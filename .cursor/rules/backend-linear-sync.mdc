@@ -1,0 +1,23 @@
+---
+description: Keep the AUX Linear team synchronized with meaningful backend changes
+globs: "{apps/api/**,packages/shared/**,supabase/**,evals/**}"
+alwaysApply: false
+---
+
+# Backend Linear Sync
+
+Whenever making a meaningful backend change:
+
+- Find the relevant issue in the AUX Linear team before or during the work.
+- After implementation and verification, update that issue with:
+  - a concise summary of the behavior changed;
+  - the affected backend area;
+  - the commit or pull request link when available;
+  - tests, type-checks, and builds that were run;
+  - remaining work or blockers.
+- Keep the issue status aligned with the actual state of the implementation.
+- Group trivial follow-up edits into the same update instead of creating noise.
+- Never include secrets, credentials, tokens, or private environment values.
+- If no suitable issue exists, ask before creating one.
+- If Linear is unavailable, tell the user that the update is pending rather than
+  silently skipping it.
