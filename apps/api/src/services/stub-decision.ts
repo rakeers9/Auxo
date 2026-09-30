@@ -8,6 +8,7 @@ const LANE_POLICY: Record<
   Lane,
   { action: VerdictAction; cooldownSeconds: number; templateId: string }
 > = {
+  L0: { action: "allow", cooldownSeconds: 0, templateId: "l0-pass" },
   L1: { action: "allow", cooldownSeconds: 0, templateId: "l1-banner" },
   L2: { action: "pause", cooldownSeconds: 60, templateId: "l2-pause" },
   L3: { action: "block", cooldownSeconds: 300, templateId: "l3-block" },

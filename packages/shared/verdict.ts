@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const LaneSchema = z.enum(["L1", "L2", "L3", "L4"]);
+// L0 is a silent pass. It is still returned and logged so friction rate can be measured.
+export const LaneSchema = z.enum(["L0", "L1", "L2", "L3", "L4"]);
 export const VerdictActionSchema = z.enum(["allow", "pause", "block"]);
 
 export const VerdictSchema = z
