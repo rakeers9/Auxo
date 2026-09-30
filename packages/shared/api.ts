@@ -1,13 +1,18 @@
-import type { Cart } from "./cart";
-import type { Verdict } from "./verdict";
+import { z } from "zod";
+import { CartSchema } from "./cart";
+import { VerdictSchema } from "./verdict";
 
-export interface DecideRequest {
-  cart: Cart;
-}
+export const DecideRequestSchema = z.object({
+  cart: CartSchema,
+});
 
-export type DecideResponse = Verdict;
+export const DecideResponseSchema = VerdictSchema;
 
-export interface ApiError {
-  code: string;
-  message: string;
-}
+export const ApiErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+});
+
+export type DecideRequest = z.infer<typeof DecideRequestSchema>;
+export type DecideResponse = z.infer<typeof DecideResponseSchema>;
+export type ApiError = z.infer<typeof ApiErrorSchema>;
