@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { VerdictSchema } from "@auxo/shared";
 
 import { buildApp } from "./app.js";
+import type { AuthService } from "./auth/auth-service.js";
 
 const openApps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
@@ -35,10 +36,11 @@ describe("GET /health", () => {
 
 describe("POST /v1/decide", () => {
   it.each([
-    ["0", "L1", "allow", 0],
-    ["1", "L2", "pause", 60],
-    ["2", "L3", "block", 300],
-    ["3", "L4", "block", 900],
+    ["0", "L0", "allow", 0],
+    ["1", "L1", "allow", 0],
+    ["2", "L2", "pause", 60],
+    ["3", "L3", "block", 300],
+    ["4", "L4", "block", 900],
   ])("maps hash suffix %s to %s", async (suffix, lane, action, cooldownSeconds) => {
     const app = await buildApp();
     openApps.push(app);
@@ -84,5 +86,53 @@ describe("POST /v1/decide", () => {
     expect(response.json()).toMatchObject({
       error: { code: "INVALID_REQUEST" },
     });
+  });
+
+  it("requires a bearer token when authentication is enabled", async () => {
+    const app = await buildApp({ authRequired: true });
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("0") },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ error: { code: "UNAUTHORIZED" } });
+  });
+
+  it("uses the authenticated user when creating a decision", async () => {
+    const userId = "00000000-0000-4000-8000-000000000099";
+    const authService: AuthService = {
+      authenticate: async (accessToken) => (accessToken === "valid" ? { id: userId } : null),
+    };
+    const app = await buildApp({ authRequired: true, authService });
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      headers: { authorization: "Bearer valid" },
+      payload: { cart: cartWithHashSuffix("1") },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(VerdictSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("rejects an invalid bearer token", async () => {
+    const authService: AuthService = { authenticate: async () => null };
+    const app = await buildApp({ authRequired: true, authService });
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      headers: { authorization: "Bearer invalid" },
+      payload: { cart: cartWithHashSuffix("1") },
+    });
+
+    expect(response.statusCode).toBe(401);
   });
 });

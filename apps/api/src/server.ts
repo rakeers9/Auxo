@@ -1,8 +1,37 @@
+import { createClient } from "@supabase/supabase-js";
+
 import { buildApp } from "./app.js";
+import { SupabaseAuthService } from "./auth/auth-service.js";
 import { loadConfig } from "./config.js";
+import { InMemoryDecisionRepository } from "./repositories/decision-repository.js";
+import { SupabaseDecisionRepository } from "./repositories/supabase-decision-repository.js";
 
 const config = loadConfig();
-const app = await buildApp({ corsOrigins: config.corsOrigins, logger: true });
+
+const authClient =
+  config.supabaseUrl && config.supabaseAnonKey
+    ? createClient(config.supabaseUrl, config.supabaseAnonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    : null;
+
+const serviceClient =
+  config.supabaseUrl && config.supabaseServiceRoleKey
+    ? createClient(config.supabaseUrl, config.supabaseServiceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    : null;
+
+const app = await buildApp({
+  corsOrigins: config.corsOrigins,
+  logger: true,
+  authRequired: config.authMode === "required",
+  ...(authClient ? { authService: new SupabaseAuthService(authClient) } : {}),
+  decisionRepository: serviceClient
+    ? new SupabaseDecisionRepository(serviceClient)
+    : new InMemoryDecisionRepository(),
+  decisionTtlSeconds: config.decisionTtlSeconds,
+});
 
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info({ signal }, "Shutting down");

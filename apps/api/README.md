@@ -13,17 +13,36 @@ pnpm dev:api
 
 The service listens on `http://127.0.0.1:3001` by default.
 
+With the default `AUTH_MODE=development`, requests without a bearer token use
+a fixed development user and decisions are held in memory. This keeps the
+extension integration unblocked before Supabase credentials are available.
+
+To enable authenticated persistence, configure all three Supabase variables in
+`.env.example` and set `AUTH_MODE=required`. The extension must then send its
+Supabase access token:
+
+```http
+Authorization: Bearer <supabase-access-token>
+```
+
+The service validates the token with Supabase Auth and uses only the resulting
+user ID. The service-role key remains server-side and is used by the decision
+repository; it must never be included in extension code.
+
 ## Current endpoints
 
 - `GET /health`
 - `POST /v1/decide`
 
 `/v1/decide` currently uses a deterministic stub. The last hexadecimal digit of
-`cart_hash`, modulo four, selects L1 through L4. This lets extension developers
+`cart_hash`, modulo five, selects L0 through L4. This lets extension developers
 reproduce every overlay state before the Jev integration is available.
 
-Use hashes ending in `0`, `1`, `2`, or `3` to request L1, L2, L3, or L4 while
-testing. The other 63 characters must also be hexadecimal.
+Within the configured decision TTL, the same authenticated user and cart hash
+reuse the stored decision instead of generating a second record.
+
+Use hashes ending in `0`, `1`, `2`, `3`, or `4` to request L0, L1, L2, L3, or
+L4 while testing. The other 63 characters must also be hexadecimal.
 
 Example request:
 
@@ -37,7 +56,7 @@ curl -X POST http://127.0.0.1:3001/v1/decide \
       "total_minor": 2500,
       "currency": "USD",
       "url": "https://example.com/cart",
-      "cart_hash": "0000000000000000000000000000000000000000000000000000000000000002"
+      "cart_hash": "0000000000000000000000000000000000000000000000000000000000000003"
     }
   }'
 ```
@@ -46,7 +65,7 @@ Example response:
 
 ```json
 {
-  "decision_id": "801bb931-9d32-5087-a658-b17f87e39c96",
+  "decision_id": "2b9ebefe-78c8-561e-9a68-da51842c65a8",
   "lane": "L3",
   "action": "block",
   "template_id": "l3-block",
@@ -55,4 +74,5 @@ Example response:
 ```
 
 `.env.example` documents the supported environment variables. In production,
-`CORS_ORIGINS` must contain at least one comma-separated extension origin.
+`CORS_ORIGINS` must contain at least one comma-separated extension origin,
+authentication must be required, and all Supabase credentials must be present.

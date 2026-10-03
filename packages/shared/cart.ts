@@ -15,7 +15,10 @@ export const CartSchema = z
     total_minor: z.number().int().nonnegative().safe(),
     currency: z.string().trim().regex(/^[A-Z]{3}$/),
     url: z.string().url(),
-    cart_hash: z.string().regex(/^(?:sha256:)?[a-f0-9]{64}$/i),
+    cart_hash: z
+      .string()
+      .regex(/^(?:sha256:)?[a-f0-9]{64}$/i)
+      .transform((value) => value.toLowerCase()),
   })
   .strict();
 
