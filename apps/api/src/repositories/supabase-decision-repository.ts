@@ -72,4 +72,19 @@ export class SupabaseDecisionRepository implements DecisionRepository {
       throw new Error("Unable to persist the decision.", { cause: error });
     }
   }
+
+  public async belongsToUser(userId: string, decisionId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from("decisions")
+      .select("id")
+      .eq("id", decisionId)
+      .eq("user_id", userId)
+      .maybeSingle<{ id: string }>();
+
+    if (error) {
+      throw new Error("Unable to verify decision ownership.", { cause: error });
+    }
+
+    return data !== null;
+  }
 }

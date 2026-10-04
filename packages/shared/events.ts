@@ -8,6 +8,7 @@ export const DecisionEventSchema = z
     decision_id: z.string().uuid(),
     action: UserActionSchema,
     occurred_at: z.string().datetime({ offset: true }),
+    metadata: z.record(z.string(), z.json()).optional(),
   })
   .strict();
 

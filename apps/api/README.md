@@ -33,6 +33,8 @@ repository; it must never be included in extension code.
 
 - `GET /health`
 - `POST /v1/decide`
+- `POST /v1/events`
+- `POST /v1/check-ins`
 
 `/v1/decide` currently uses a deterministic stub. The last hexadecimal digit of
 `cart_hash`, modulo five, selects L0 through L4. This lets extension developers
@@ -76,3 +78,32 @@ Example response:
 `.env.example` documents the supported environment variables. In production,
 `CORS_ORIGINS` must contain at least one comma-separated extension origin,
 authentication must be required, and all Supabase credentials must be present.
+
+## Recording outcomes
+
+The extension records what happened after a verdict with `POST /v1/events`:
+
+```json
+{
+  "event_id": "a508f723-41f4-44c1-92cc-bf357581cd3a",
+  "decision_id": "2b9ebefe-78c8-561e-9a68-da51842c65a8",
+  "action": "saved",
+  "occurred_at": "2026-10-04T16:00:00.000Z",
+  "metadata": { "source": "overlay" }
+}
+```
+
+Delayed purchase feedback is sent to `POST /v1/check-ins`:
+
+```json
+{
+  "decision_id": "2b9ebefe-78c8-561e-9a68-da51842c65a8",
+  "worth_it": "yes",
+  "note": "Used it immediately.",
+  "answered_at": "2026-10-04T17:00:00.000Z"
+}
+```
+
+Both endpoints verify that the decision belongs to the authenticated user.
+First submissions return `201`; idempotent retries return `200` with
+`duplicate: true`.

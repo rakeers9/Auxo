@@ -15,6 +15,7 @@ export interface DecisionRepository {
     policyVersion: string,
     now: Date,
   ): Promise<Verdict | null>;
+  belongsToUser(userId: string, decisionId: string): Promise<boolean>;
   save(record: DecisionRecord): Promise<void>;
 }
 
@@ -40,6 +41,12 @@ export class InMemoryDecisionRepository implements DecisionRepository {
     this.records.set(
       this.key(record.userId, record.cart.cart_hash, record.policyVersion),
       record,
+    );
+  }
+
+  public async belongsToUser(userId: string, decisionId: string): Promise<boolean> {
+    return [...this.records.values()].some(
+      (record) => record.userId === userId && record.verdict.decision_id === decisionId,
     );
   }
 

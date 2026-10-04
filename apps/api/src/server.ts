@@ -4,7 +4,9 @@ import { buildApp } from "./app.js";
 import { SupabaseAuthService } from "./auth/auth-service.js";
 import { loadConfig } from "./config.js";
 import { InMemoryDecisionRepository } from "./repositories/decision-repository.js";
+import { InMemoryOutcomeRepository } from "./repositories/outcome-repository.js";
 import { SupabaseDecisionRepository } from "./repositories/supabase-decision-repository.js";
+import { SupabaseOutcomeRepository } from "./repositories/supabase-outcome-repository.js";
 
 const config = loadConfig();
 
@@ -30,6 +32,9 @@ const app = await buildApp({
   decisionRepository: serviceClient
     ? new SupabaseDecisionRepository(serviceClient)
     : new InMemoryDecisionRepository(),
+  outcomeRepository: serviceClient
+    ? new SupabaseOutcomeRepository(serviceClient)
+    : new InMemoryOutcomeRepository(),
   decisionTtlSeconds: config.decisionTtlSeconds,
 });
 

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { VerdictSchema } from "@auxo/shared";
@@ -134,5 +136,128 @@ describe("POST /v1/decide", () => {
     });
 
     expect(response.statusCode).toBe(401);
+  });
+});
+
+describe("POST /v1/events", () => {
+  it("stores an event once and treats a replay as a duplicate", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const decisionResponse = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("2") },
+    });
+    const decisionId = decisionResponse.json().decision_id as string;
+    const event = {
+      event_id: randomUUID(),
+      decision_id: decisionId,
+      action: "saved",
+      occurred_at: "2026-10-04T12:00:00.000Z",
+      metadata: { source: "overlay" },
+    };
+
+    const first = await app.inject({ method: "POST", url: "/v1/events", payload: event });
+    const second = await app.inject({ method: "POST", url: "/v1/events", payload: event });
+
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toEqual({ accepted: true, duplicate: false });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual({ accepted: true, duplicate: true });
+  });
+
+  it("does not expose another user's decision", async () => {
+    const authService: AuthService = {
+      authenticate: async (accessToken) => ({ id: accessToken }),
+    };
+    const app = await buildApp({ authRequired: true, authService });
+    openApps.push(app);
+    const decisionResponse = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      headers: { authorization: "Bearer user-a" },
+      payload: { cart: cartWithHashSuffix("3") },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: { authorization: "Bearer user-b" },
+      payload: {
+        event_id: randomUUID(),
+        decision_id: decisionResponse.json().decision_id,
+        action: "left",
+        occurred_at: "2026-10-04T12:00:00.000Z",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: { code: "DECISION_NOT_FOUND" } });
+  });
+
+  it("rejects an invalid event", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      payload: { action: "unknown" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+  });
+});
+
+describe("POST /v1/check-ins", () => {
+  it("stores one check-in per decision and handles retries", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const decisionResponse = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("4") },
+    });
+    const checkIn = {
+      decision_id: decisionResponse.json().decision_id,
+      worth_it: "yes",
+      note: "Used it immediately.",
+      answered_at: "2026-10-04T13:00:00.000Z",
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/v1/check-ins",
+      payload: checkIn,
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/v1/check-ins",
+      payload: checkIn,
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toEqual({ accepted: true, duplicate: false });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual({ accepted: true, duplicate: true });
+  });
+
+  it("rejects a check-in for an unknown decision", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/check-ins",
+      payload: {
+        decision_id: randomUUID(),
+        worth_it: "regret",
+        answered_at: "2026-10-04T13:00:00.000Z",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: { code: "DECISION_NOT_FOUND" } });
   });
 });
