@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Cart } from "@auxo/shared";
 
 import { InMemoryDecisionRepository } from "../repositories/decision-repository.js";
 import { InMemorySettingsRepository } from "../repositories/settings-repository.js";
 import { DecisionService } from "./decision-service.js";
+import type { JevDecisionProvider } from "./jev-provider.js";
 
 const cart: Cart = {
   merchant: "Example Store",
@@ -67,5 +68,45 @@ describe("DecisionService", () => {
     expect(blocked.lane).toBe("L3");
     expect(allowed.lane).toBe("L0");
     expect(allowed.decision_id).not.toBe(blocked.decision_id);
+  });
+
+  it("uses Jev to escalate but never weaken the deterministic policy", async () => {
+    const repository = new InMemoryDecisionRepository();
+    const settingsRepository = new InMemorySettingsRepository();
+    await settingsRepository.createRule("user-1", {
+      name: "Large cart",
+      rule_type: "cart_total",
+      configuration: { threshold_minor: 500, lane: "L3" },
+      enabled: true,
+    });
+    const jevProvider: JevDecisionProvider = {
+      modelVersion: "jev-test",
+      evaluate: async () => ({
+        lane: "L1",
+        confidence: 0.8,
+        probabilities: { L0: 0.05, L1: 0.8, L2: 0.1, L3: 0.04, L4: 0.01 },
+        model: "jev-test",
+      }),
+    };
+    const service = new DecisionService({ repository, settingsRepository, jevProvider, ttlSeconds: 60 });
+
+    expect((await service.decide("user-1", cart)).lane).toBe("L3");
+  });
+
+  it("falls back safely when Jev fails", async () => {
+    const onJevError = vi.fn();
+    const service = new DecisionService({
+      repository: new InMemoryDecisionRepository(),
+      ttlSeconds: 60,
+      onJevError,
+      jevProvider: {
+        modelVersion: "jev-test",
+        evaluate: async () => Promise.reject(new Error("timeout")),
+      },
+    });
+
+    const verdict = await service.decide("user-1", cart);
+    expect(verdict).toMatchObject({ lane: "L0", action: "allow" });
+    expect(onJevError).toHaveBeenCalledOnce();
   });
 });

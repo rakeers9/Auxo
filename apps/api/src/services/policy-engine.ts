@@ -125,7 +125,7 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
 }
 
-function maxLane(left: Lane, right: Lane): Lane {
+export function maxLane(left: Lane, right: Lane): Lane {
   return LANE_RANK[left] >= LANE_RANK[right] ? left : right;
 }
 

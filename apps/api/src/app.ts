@@ -28,6 +28,7 @@ import {
   type SettingsRepository,
 } from "./repositories/settings-repository.js";
 import { SettingNotFoundError, SettingsService } from "./services/settings-service.js";
+import type { JevDecisionProvider } from "./services/jev-provider.js";
 
 const DEVELOPMENT_USER_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -40,6 +41,7 @@ export interface BuildAppOptions {
   outcomeRepository?: OutcomeRepository;
   settingsRepository?: SettingsRepository;
   decisionTtlSeconds?: number;
+  jevProvider?: JevDecisionProvider;
 }
 
 function bearerToken(request: FastifyRequest): string | null {
@@ -62,6 +64,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const decisionService = new DecisionService({
     repository: decisionRepository,
     settingsRepository,
+    ...(options.jevProvider ? { jevProvider: options.jevProvider } : {}),
+    onJevError: (error) => app.log.warn({ error }, "Jev evaluation failed; using fallback"),
     ttlSeconds: options.decisionTtlSeconds ?? 86_400,
   });
   const outcomeService = new OutcomeService(

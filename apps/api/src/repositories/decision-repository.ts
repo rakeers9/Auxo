@@ -5,8 +5,9 @@ export interface DecisionRecord {
   cart: Cart;
   verdict: Verdict;
   policyVersion: string;
-  modelProvider: "stub" | "policy-engine";
+  modelProvider: "stub" | "policy-engine" | "typesafe-jev" | "jev-fallback";
   modelVersion: string;
+  modelOutput?: unknown;
   expiresAt: string;
 }
 

@@ -61,6 +61,24 @@ stub: the last hexadecimal digit of `cart_hash`, modulo five, selects L0 through
 L4. This lets extension developers reproduce every overlay state before the Jev
 integration is available.
 
+## Jev decision signal
+
+Set `TYPESAFE_API_KEY` to enable TypeSafe AI's Jev decision model. The API sends
+the cart, enabled rules, budgets, and deterministic policy lane to one typed
+choice question. Jev returns L0 through L4 with calibrated probabilities and
+confidence; Auxo always selects the stricter of Jev and the deterministic
+policy, so Jev cannot weaken a hard rule or budget block.
+
+The Jev request has a configurable short timeout (`JEV_TIMEOUT_MS`, 2000 ms by
+default), no automatic retries, and never exposes the key to the extension.
+Timeouts, provider errors, and invalid responses fall back to the deterministic
+engine. The selected model and structured Jev output are stored with the
+decision for later evaluation.
+
+Optional provider settings are `TYPESAFE_BASE_URL` and
+`TYPESAFE_DEFAULT_MODEL`; their defaults are the official TypeSafe API and
+`jev-latest`.
+
 Within the configured decision TTL, the same authenticated user, cart hash, and
 policy configuration reuse the stored decision. Changing a rule or budget
 automatically causes the cart to be evaluated again.

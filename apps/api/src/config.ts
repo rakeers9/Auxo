@@ -10,6 +10,10 @@ const EnvironmentSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   DECISION_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
+  TYPESAFE_API_KEY: z.string().min(1).optional(),
+  TYPESAFE_BASE_URL: z.string().url().optional(),
+  TYPESAFE_DEFAULT_MODEL: z.string().min(1).default("jev-latest"),
+  JEV_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(2_000),
 });
 
 export interface ApiConfig {
@@ -22,6 +26,10 @@ export interface ApiConfig {
   supabaseAnonKey: string | undefined;
   supabaseServiceRoleKey: string | undefined;
   decisionTtlSeconds: number;
+  typesafeApiKey: string | undefined;
+  typesafeBaseUrl: string | undefined;
+  typesafeDefaultModel: string;
+  jevTimeoutMs: number;
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -65,5 +73,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     supabaseAnonKey: parsed.SUPABASE_ANON_KEY,
     supabaseServiceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY,
     decisionTtlSeconds: parsed.DECISION_TTL_SECONDS,
+    typesafeApiKey: parsed.TYPESAFE_API_KEY,
+    typesafeBaseUrl: parsed.TYPESAFE_BASE_URL,
+    typesafeDefaultModel: parsed.TYPESAFE_DEFAULT_MODEL,
+    jevTimeoutMs: parsed.JEV_TIMEOUT_MS,
   };
 }

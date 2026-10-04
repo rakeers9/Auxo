@@ -21,4 +21,12 @@ describe("loadConfig", () => {
       loadConfig({ NODE_ENV: "development", SUPABASE_URL: "https://example.supabase.co" }),
     ).toThrow("must be configured together");
   });
+
+  it("loads Jev configuration with safe defaults", () => {
+    const config = loadConfig({ NODE_ENV: "development", TYPESAFE_API_KEY: "test-key" });
+
+    expect(config.typesafeApiKey).toBe("test-key");
+    expect(config.typesafeDefaultModel).toBe("jev-latest");
+    expect(config.jevTimeoutMs).toBe(2_000);
+  });
 });
