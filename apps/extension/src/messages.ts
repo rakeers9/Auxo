@@ -8,7 +8,7 @@ export interface DecideMessage {
 
 // Background worker -> content script. Any failure is reported, never thrown,
 // so the caller can fail open.
-export type DecideFailureReason = "timeout" | "network" | "http" | "invalid_response";
+export type DecideFailureReason = "timeout" | "network" | "http" | "invalid_response" | "invalid_cart";
 
 export type DecideResult =
   | { ok: true; verdict: Verdict }
