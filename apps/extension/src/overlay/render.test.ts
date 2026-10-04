@@ -35,6 +35,18 @@ function countdownText(root: ShadowRoot): string {
   return root.querySelector('[data-role="countdown"]')?.textContent ?? "";
 }
 
+// Dispatches a keydown from whatever has focus (inside the shadow root, or the page).
+function press(root: ShadowRoot, key: string, shiftKey = false): KeyboardEvent {
+  const target = root.activeElement ?? document.activeElement ?? document.body;
+  const event = new KeyboardEvent("keydown", { key, shiftKey, bubbles: true, composed: true, cancelable: true });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function focusedAction(root: ShadowRoot): string | undefined {
+  return (root.activeElement as HTMLElement | null)?.dataset.action;
+}
+
 describe("renderOverlay", () => {
   let root: ShadowRoot;
   let onExit: ReturnType<typeof vi.fn<(action: string) => void>>;
@@ -196,6 +208,101 @@ describe("renderOverlay", () => {
     expect(vi.getTimerCount()).toBe(0);
     handle?.destroy(); // idempotent
     expect(onExit).not.toHaveBeenCalled();
+  });
+
+  describe("keyboard", () => {
+    it("L1: Escape dismisses the banner without calling onExit or swallowing the key", () => {
+      handle = renderOverlay(root, verdict("L1"), { onExit });
+      const event = press(root, "Escape");
+      expect(root.querySelector(".auxo-banner")).toBeNull();
+      expect(event.defaultPrevented).toBe(false);
+      expect(onExit).not.toHaveBeenCalled();
+    });
+
+    it("L1: Escape listener is removed by destroy()", () => {
+      handle = renderOverlay(root, verdict("L1"), { onExit });
+      const banner = root.querySelector(".auxo-banner");
+      handle?.destroy();
+      root.append(banner as Node); // re-attach to prove the listener is gone
+      press(root, "Escape");
+      expect(root.querySelector(".auxo-banner")).not.toBeNull();
+    });
+
+    it.each(["L2", "L3", "L4"] as const)("%s: Escape does nothing and keeps the dialog", (lane) => {
+      handle = renderOverlay(root, verdict(lane), { onExit });
+      const outside = vi.fn();
+      document.addEventListener("keydown", outside);
+      const event = press(root, "Escape");
+      document.removeEventListener("keydown", outside);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(outside).not.toHaveBeenCalled();
+      expect(root.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(onExit).not.toHaveBeenCalled();
+    });
+
+    it("L3: Escape does not unlock go anyway", () => {
+      handle = renderOverlay(root, verdict("L3"), { onExit });
+      press(root, "Escape");
+      expect(btn(root, "go-anyway").disabled).toBe(true);
+    });
+
+    it("L3: Tab and Shift+Tab skip the locked go anyway during the cooldown", () => {
+      handle = renderOverlay(root, verdict("L3"), { onExit });
+      expect(focusedAction(root)).toBe("leave");
+      press(root, "Tab");
+      expect(focusedAction(root)).toBe("save");
+      press(root, "Tab");
+      expect(focusedAction(root)).toBe("leave");
+      press(root, "Tab", true);
+      expect(focusedAction(root)).toBe("save");
+    });
+
+    it("L4: Tab cycles through all three buttons after the cooldown", () => {
+      handle = renderOverlay(root, verdict("L4"), { onExit });
+      vi.advanceTimersByTime(COOLDOWN.L4 * 1000);
+      const seen = [focusedAction(root)];
+      for (let i = 0; i < 3; i++) {
+        const event = press(root, "Tab");
+        expect(event.defaultPrevented).toBe(true);
+        seen.push(focusedAction(root));
+      }
+      expect(seen).toEqual(["leave", "save", "go-anyway", "leave"]);
+      press(root, "Tab", true);
+      expect(focusedAction(root)).toBe("go-anyway");
+    });
+
+    it("L2: Tab keeps focus on the dialog while continue is locked, then reaches it", () => {
+      handle = renderOverlay(root, verdict("L2"), { onExit });
+      const dialog = root.querySelector('[role="dialog"]');
+      expect(root.activeElement).toBe(dialog);
+      press(root, "Tab");
+      expect(root.activeElement).toBe(dialog);
+
+      vi.advanceTimersByTime(COOLDOWN.L2 * 1000);
+      press(root, "Tab");
+      expect(focusedAction(root)).toBe("continue");
+      press(root, "Tab");
+      expect(focusedAction(root)).toBe("continue");
+    });
+
+    it("focus moved to the page is pulled back into the dialog", () => {
+      handle = renderOverlay(root, verdict("L3"), { onExit });
+      const pageButton = document.createElement("button");
+      document.body.append(pageButton);
+      pageButton.focus();
+      expect(document.activeElement).not.toBe(pageButton);
+      expect(root.activeElement).toBe(root.querySelector('[role="dialog"]'));
+    });
+
+    it("destroy() releases the focus trap", () => {
+      handle = renderOverlay(root, verdict("L3"), { onExit });
+      handle?.destroy();
+      const pageButton = document.createElement("button");
+      document.body.append(pageButton);
+      pageButton.focus();
+      expect(document.activeElement).toBe(pageButton);
+    });
   });
 
   it("an unknown template_id falls back to the lane's template", () => {

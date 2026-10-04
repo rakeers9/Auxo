@@ -67,8 +67,9 @@ interface View {
   stops: Array<() => void>;
 }
 
-// L1: a small banner. Dismissing it is not an exit, so onExit is never called.
-function renderBanner({ doc, container, template }: View): void {
+// L1: a small banner. Dismissing it (button or Escape) is not an exit, so onExit
+// is never called.
+function renderBanner({ doc, container, template, stops }: View): void {
   const banner = el(doc, "div", "auxo-banner");
   banner.setAttribute("role", "status");
 
@@ -77,7 +78,19 @@ function renderBanner({ doc, container, template }: View): void {
 
   const dismiss = button(doc, "×", "dismiss", "auxo-dismiss");
   dismiss.setAttribute("aria-label", "Dismiss");
-  dismiss.addEventListener("click", () => banner.remove());
+
+  // The banner is non-modal, so focus is usually on the page. Escape is heard at
+  // the document but not swallowed, so the page's own Escape handling still runs.
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") dismissBanner();
+  };
+  const dismissBanner = () => {
+    banner.remove();
+    doc.removeEventListener("keydown", onKeyDown);
+  };
+  dismiss.addEventListener("click", dismissBanner);
+  doc.addEventListener("keydown", onKeyDown);
+  stops.push(() => doc.removeEventListener("keydown", onKeyDown));
 
   banner.append(text, dismiss);
   container.append(banner);
@@ -120,7 +133,8 @@ function renderBlock(view: View, cooldownSeconds: number): void {
 }
 
 // Backdrop + modal dialog with title, body, countdown line, and an actions row.
-function dialogShell({ doc, container, template }: View) {
+function dialogShell(view: View) {
+  const { doc, container, template } = view;
   const id = `auxo-${++idCounter}`;
   const backdrop = el(doc, "div", "auxo-backdrop");
   const dialog = el(doc, "div", "auxo-dialog");
@@ -141,7 +155,43 @@ function dialogShell({ doc, container, template }: View) {
   dialog.append(title, body, countdown, actions);
   backdrop.append(dialog);
   container.append(backdrop);
+  trapFocus(view, dialog);
   return { dialog, countdown, actions };
+}
+
+// Keeps keyboard focus inside an open dialog. Tab and Shift+Tab cycle through
+// its enabled buttons, focus that lands on the page is pulled back, and Escape
+// does nothing: the friction can't be skipped, only waited out.
+function trapFocus({ doc, stops }: View, dialog: HTMLElement): void {
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    event.preventDefault();
+
+    const buttons = [...dialog.querySelectorAll("button")].filter((b) => !b.disabled);
+    if (buttons.length === 0) {
+      dialog.focus();
+      return;
+    }
+    const active = (dialog.getRootNode() as Document | ShadowRoot).activeElement;
+    const current = buttons.findIndex((b) => b === active);
+    const step = event.shiftKey ? -1 : 1;
+    const next =
+      current === -1 ? (event.shiftKey ? buttons.length - 1 : 0) : (current + step + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  });
+
+  // composedPath() sees through the shadow root, where event.target would be
+  // retargeted to the host element.
+  const onFocusIn = (event: FocusEvent) => {
+    if (!event.composedPath().includes(dialog)) dialog.focus();
+  };
+  doc.addEventListener("focusin", onFocusIn);
+  stops.push(() => doc.removeEventListener("focusin", onFocusIn));
 }
 
 // Each overlay reports at most one exit; after that every button is disabled.
