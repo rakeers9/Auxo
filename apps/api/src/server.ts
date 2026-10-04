@@ -7,6 +7,8 @@ import { InMemoryDecisionRepository } from "./repositories/decision-repository.j
 import { InMemoryOutcomeRepository } from "./repositories/outcome-repository.js";
 import { SupabaseDecisionRepository } from "./repositories/supabase-decision-repository.js";
 import { SupabaseOutcomeRepository } from "./repositories/supabase-outcome-repository.js";
+import { InMemorySettingsRepository } from "./repositories/settings-repository.js";
+import { SupabaseSettingsRepository } from "./repositories/supabase-settings-repository.js";
 
 const config = loadConfig();
 
@@ -35,6 +37,9 @@ const app = await buildApp({
   outcomeRepository: serviceClient
     ? new SupabaseOutcomeRepository(serviceClient)
     : new InMemoryOutcomeRepository(),
+  settingsRepository: serviceClient
+    ? new SupabaseSettingsRepository(serviceClient)
+    : new InMemorySettingsRepository(),
   decisionTtlSeconds: config.decisionTtlSeconds,
 });
 

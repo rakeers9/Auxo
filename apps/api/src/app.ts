@@ -1,7 +1,16 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
-import { CheckInSchema, DecideRequestSchema, DecisionEventSchema } from "@auxo/shared";
+import {
+  CheckInSchema,
+  CreateBudgetSchema,
+  CreateRuleSchema,
+  DecideRequestSchema,
+  DecisionEventSchema,
+  UpdateBudgetSchema,
+  UpdateRuleSchema,
+} from "@auxo/shared";
+import { z } from "zod";
 
 import type { AuthService, AuthenticatedUser } from "./auth/auth-service.js";
 import {
@@ -14,6 +23,11 @@ import {
 } from "./repositories/outcome-repository.js";
 import { DecisionService } from "./services/decision-service.js";
 import { DecisionNotFoundError, OutcomeService } from "./services/outcome-service.js";
+import {
+  InMemorySettingsRepository,
+  type SettingsRepository,
+} from "./repositories/settings-repository.js";
+import { SettingNotFoundError, SettingsService } from "./services/settings-service.js";
 
 const DEVELOPMENT_USER_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -24,6 +38,7 @@ export interface BuildAppOptions {
   authService?: AuthService;
   decisionRepository?: DecisionRepository;
   outcomeRepository?: OutcomeRepository;
+  settingsRepository?: SettingsRepository;
   decisionTtlSeconds?: number;
 }
 
@@ -50,6 +65,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const outcomeService = new OutcomeService(
     decisionRepository,
     options.outcomeRepository ?? new InMemoryOutcomeRepository(),
+  );
+  const settingsService = new SettingsService(
+    options.settingsRepository ?? new InMemorySettingsRepository(),
   );
 
   await app.register(cors, {
@@ -156,6 +174,80 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     return reply.status(receipt.duplicate ? 200 : 201).send(receipt);
   });
 
+  const IdParamsSchema = z.object({ id: z.string().uuid() }).strict();
+
+  app.get("/v1/rules", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    return reply.send({ rules: await settingsService.listRules(user.id) });
+  });
+
+  app.post("/v1/rules", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const parsed = CreateRuleSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return invalidRequest(reply, "The rule request is invalid.", parsed.error.flatten());
+    }
+    return reply.status(201).send(await settingsService.createRule(user.id, parsed.data));
+  });
+
+  app.patch("/v1/rules/:id", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const params = IdParamsSchema.safeParse(request.params);
+    const body = UpdateRuleSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return invalidRequest(reply, "The rule update is invalid.");
+    }
+    return reply.send(await settingsService.updateRule(user.id, params.data.id, body.data));
+  });
+
+  app.delete("/v1/rules/:id", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const params = IdParamsSchema.safeParse(request.params);
+    if (!params.success) return invalidRequest(reply, "The rule ID is invalid.");
+    await settingsService.deleteRule(user.id, params.data.id);
+    return reply.status(204).send();
+  });
+
+  app.get("/v1/budgets", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    return reply.send({ budgets: await settingsService.listBudgets(user.id) });
+  });
+
+  app.post("/v1/budgets", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const parsed = CreateBudgetSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return invalidRequest(reply, "The budget request is invalid.", parsed.error.flatten());
+    }
+    return reply.status(201).send(await settingsService.createBudget(user.id, parsed.data));
+  });
+
+  app.patch("/v1/budgets/:id", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const params = IdParamsSchema.safeParse(request.params);
+    const body = UpdateBudgetSchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      return invalidRequest(reply, "The budget update is invalid.");
+    }
+    return reply.send(await settingsService.updateBudget(user.id, params.data.id, body.data));
+  });
+
+  app.delete("/v1/budgets/:id", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const params = IdParamsSchema.safeParse(request.params);
+    if (!params.success) return invalidRequest(reply, "The budget ID is invalid.");
+    await settingsService.deleteBudget(user.id, params.data.id);
+    return reply.status(204).send();
+  });
+
   app.setNotFoundHandler(async (_request, reply) =>
     reply.status(404).send({
       error: {
@@ -175,6 +267,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       });
     }
 
+    if (error instanceof SettingNotFoundError) {
+      return reply.status(404).send({
+        error: {
+          code: "SETTING_NOT_FOUND",
+          message: "The setting does not exist for the authenticated user.",
+        },
+      });
+    }
+
     app.log.error(error);
     return reply.status(500).send({
       error: {
@@ -185,4 +286,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   return app;
+}
+
+function unauthorized(reply: { status(code: number): { send(payload: unknown): unknown } }) {
+  return reply.status(401).send({
+    error: { code: "UNAUTHORIZED", message: "A valid bearer token is required." },
+  });
+}
+
+function invalidRequest(
+  reply: { status(code: number): { send(payload: unknown): unknown } },
+  message: string,
+  details?: unknown,
+) {
+  return reply.status(400).send({
+    error: { code: "INVALID_REQUEST", message, ...(details ? { details } : {}) },
+  });
 }

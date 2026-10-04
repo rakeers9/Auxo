@@ -35,6 +35,14 @@ repository; it must never be included in extension code.
 - `POST /v1/decide`
 - `POST /v1/events`
 - `POST /v1/check-ins`
+- `GET /v1/rules`
+- `POST /v1/rules`
+- `PATCH /v1/rules/:id`
+- `DELETE /v1/rules/:id`
+- `GET /v1/budgets`
+- `POST /v1/budgets`
+- `PATCH /v1/budgets/:id`
+- `DELETE /v1/budgets/:id`
 
 `/v1/decide` currently uses a deterministic stub. The last hexadecimal digit of
 `cart_hash`, modulo five, selects L0 through L4. This lets extension developers
@@ -107,3 +115,38 @@ Delayed purchase feedback is sent to `POST /v1/check-ins`:
 Both endpoints verify that the decision belongs to the authenticated user.
 First submissions return `201`; idempotent retries return `200` with
 `duplicate: true`.
+
+## Rules and budgets
+
+All settings endpoints are scoped to the authenticated user. Attempts to update
+or delete another user's setting return `404` without revealing that it exists.
+
+Create a rule with `POST /v1/rules`:
+
+```json
+{
+  "name": "Pause large purchases",
+  "rule_type": "cart_total",
+  "configuration": { "threshold_minor": 10000 },
+  "enabled": true
+}
+```
+
+`GET /v1/rules` returns `{ "rules": [...] }`. Use `PATCH /v1/rules/:id`
+with one or more rule fields to change it, or `DELETE /v1/rules/:id` to remove
+it.
+
+Create a budget period with `POST /v1/budgets`:
+
+```json
+{
+  "currency": "USD",
+  "limit_minor": 50000,
+  "period_start": "2026-10-01",
+  "period_end": "2026-10-31"
+}
+```
+
+Money is always represented in minor units. The backend initializes
+`spent_minor` to zero; clients cannot directly overwrite it. `GET /v1/budgets`
+returns `{ "budgets": [...] }`, and `PATCH /v1/budgets/:id` changes the limit.

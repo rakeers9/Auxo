@@ -261,3 +261,113 @@ describe("POST /v1/check-ins", () => {
     expect(response.json()).toMatchObject({ error: { code: "DECISION_NOT_FOUND" } });
   });
 });
+
+describe("rule settings", () => {
+  it("creates, lists, updates, and deletes a rule", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/rules",
+      payload: {
+        name: "Pause large purchases",
+        rule_type: "cart_total",
+        configuration: { threshold_minor: 10000 },
+        enabled: true,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const ruleId = created.json().id as string;
+
+    const listed = await app.inject({ method: "GET", url: "/v1/rules" });
+    expect(listed.json().rules).toHaveLength(1);
+
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${ruleId}`,
+      payload: { enabled: false },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ id: ruleId, enabled: false });
+
+    expect((await app.inject({ method: "DELETE", url: `/v1/rules/${ruleId}` })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: "/v1/rules" })).json().rules).toEqual([]);
+  });
+
+  it("hides another user's rule", async () => {
+    const authService: AuthService = { authenticate: async (token) => ({ id: token }) };
+    const app = await buildApp({ authRequired: true, authService });
+    openApps.push(app);
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/rules",
+      headers: { authorization: "Bearer user-a" },
+      payload: { name: "Rule", rule_type: "merchant", configuration: {}, enabled: true },
+    });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${created.json().id}`,
+      headers: { authorization: "Bearer user-b" },
+      payload: { enabled: false },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: { code: "SETTING_NOT_FOUND" } });
+  });
+
+  it("rejects empty rule updates", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const response = await app.inject({ method: "PATCH", url: `/v1/rules/${randomUUID()}`, payload: {} });
+    expect(response.statusCode).toBe(400);
+  });
+});
+
+describe("budget settings", () => {
+  it("creates, lists, updates, and deletes a budget", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/budgets",
+      payload: {
+        currency: "USD",
+        limit_minor: 50000,
+        period_start: "2026-10-01",
+        period_end: "2026-10-31",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().spent_minor).toBe(0);
+    const budgetId = created.json().id as string;
+
+    expect((await app.inject({ method: "GET", url: "/v1/budgets" })).json().budgets).toHaveLength(1);
+    const updated = await app.inject({
+      method: "PATCH",
+      url: `/v1/budgets/${budgetId}`,
+      payload: { limit_minor: 60000 },
+    });
+    expect(updated.json()).toMatchObject({ id: budgetId, limit_minor: 60000, spent_minor: 0 });
+
+    expect((await app.inject({ method: "DELETE", url: `/v1/budgets/${budgetId}` })).statusCode).toBe(204);
+  });
+
+  it("rejects an invalid budget period", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/budgets",
+      payload: { currency: "USD", limit_minor: 1000, period_start: "2026-11-01", period_end: "2026-10-01" },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("requires authentication for settings endpoints", async () => {
+    const app = await buildApp({ authRequired: true });
+    openApps.push(app);
+    expect((await app.inject({ method: "GET", url: "/v1/rules" })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/v1/budgets" })).statusCode).toBe(401);
+  });
+});
