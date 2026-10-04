@@ -10,10 +10,10 @@ const EnvironmentSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   DECISION_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
-  TYPESAFE_API_KEY: z.string().min(1).optional(),
-  TYPESAFE_BASE_URL: z.string().url().optional(),
-  TYPESAFE_DEFAULT_MODEL: z.string().min(1).default("jev-latest"),
-  JEV_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(2_000),
+  CLOUDFLARE_ACCOUNT_ID: z.string().min(1).optional(),
+  CLOUDFLARE_API_TOKEN: z.string().min(1).optional(),
+  CLEF_MODEL: z.enum(["clef", "clef-flash"]).default("clef"),
+  DECISION_MODEL_TIMEOUT_MS: z.coerce.number().int().positive().max(30_000).default(2_000),
 });
 
 export interface ApiConfig {
@@ -26,10 +26,10 @@ export interface ApiConfig {
   supabaseAnonKey: string | undefined;
   supabaseServiceRoleKey: string | undefined;
   decisionTtlSeconds: number;
-  typesafeApiKey: string | undefined;
-  typesafeBaseUrl: string | undefined;
-  typesafeDefaultModel: string;
-  jevTimeoutMs: number;
+  cloudflareAccountId: string | undefined;
+  cloudflareApiToken: string | undefined;
+  clefModel: "clef" | "clef-flash";
+  decisionModelTimeoutMs: number;
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiConfig {
@@ -63,6 +63,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     throw new Error("Supabase credentials are required when AUTH_MODE is required.");
   }
 
+  if (Boolean(parsed.CLOUDFLARE_ACCOUNT_ID) !== Boolean(parsed.CLOUDFLARE_API_TOKEN)) {
+    throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be configured together.");
+  }
+
   return {
     nodeEnv: parsed.NODE_ENV,
     host: parsed.HOST,
@@ -73,9 +77,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     supabaseAnonKey: parsed.SUPABASE_ANON_KEY,
     supabaseServiceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY,
     decisionTtlSeconds: parsed.DECISION_TTL_SECONDS,
-    typesafeApiKey: parsed.TYPESAFE_API_KEY,
-    typesafeBaseUrl: parsed.TYPESAFE_BASE_URL,
-    typesafeDefaultModel: parsed.TYPESAFE_DEFAULT_MODEL,
-    jevTimeoutMs: parsed.JEV_TIMEOUT_MS,
+    cloudflareAccountId: parsed.CLOUDFLARE_ACCOUNT_ID,
+    cloudflareApiToken: parsed.CLOUDFLARE_API_TOKEN,
+    clefModel: parsed.CLEF_MODEL,
+    decisionModelTimeoutMs: parsed.DECISION_MODEL_TIMEOUT_MS,
   };
 }

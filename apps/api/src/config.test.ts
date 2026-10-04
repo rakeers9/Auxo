@@ -22,11 +22,20 @@ describe("loadConfig", () => {
     ).toThrow("must be configured together");
   });
 
-  it("loads Jev configuration with safe defaults", () => {
-    const config = loadConfig({ NODE_ENV: "development", TYPESAFE_API_KEY: "test-key" });
+  it("loads Clef configuration with safe defaults", () => {
+    const config = loadConfig({
+      NODE_ENV: "development",
+      CLOUDFLARE_ACCOUNT_ID: "account-id",
+      CLOUDFLARE_API_TOKEN: "test-token",
+    });
 
-    expect(config.typesafeApiKey).toBe("test-key");
-    expect(config.typesafeDefaultModel).toBe("jev-latest");
-    expect(config.jevTimeoutMs).toBe(2_000);
+    expect(config.clefModel).toBe("clef");
+    expect(config.decisionModelTimeoutMs).toBe(2_000);
+  });
+
+  it("rejects partial Cloudflare configuration", () => {
+    expect(() =>
+      loadConfig({ NODE_ENV: "development", CLOUDFLARE_ACCOUNT_ID: "account-id" }),
+    ).toThrow("must be configured together");
   });
 });

@@ -2,7 +2,7 @@ import type { Cart, Verdict } from "@auxo/shared";
 
 import type { DecisionRepository } from "../repositories/decision-repository.js";
 import type { SettingsRepository } from "../repositories/settings-repository.js";
-import type { JevDecisionProvider, JevSignal } from "./jev-provider.js";
+import type { DecisionModelProvider, DecisionSignal } from "./decision-model-provider.js";
 import { createPolicyVerdict, evaluatePolicy, maxLane, policyVersion } from "./policy-engine.js";
 import { createStubVerdict } from "./stub-decision.js";
 
@@ -11,8 +11,8 @@ export const STUB_POLICY_VERSION = "stub-v1";
 export interface DecisionServiceOptions {
   repository: DecisionRepository;
   settingsRepository?: SettingsRepository;
-  jevProvider?: JevDecisionProvider;
-  onJevError?: (error: unknown) => void;
+  decisionModelProvider?: DecisionModelProvider;
+  onDecisionModelError?: (error: unknown) => void;
   ttlSeconds: number;
   now?: () => Date;
 }
@@ -34,8 +34,8 @@ export class DecisionService {
       : [[], []];
     const hasPolicyData = rules.length > 0 || budgets.length > 0;
     const baseVersion = hasPolicyData ? policyVersion(rules, budgets) : STUB_POLICY_VERSION;
-    const version = this.options.jevProvider
-      ? `${baseVersion}:jev:${this.options.jevProvider.modelVersion}`
+    const version = this.options.decisionModelProvider
+      ? `${baseVersion}:model:${this.options.decisionModelProvider.modelVersion}`
       : baseVersion;
     const existing = await this.options.repository.findActive(
       userId,
@@ -51,24 +51,24 @@ export class DecisionService {
     const deterministicLane = hasPolicyData
       ? evaluatePolicy({ cart, rules, budgets, now })
       : null;
-    let jevSignal: JevSignal | null = null;
+    let modelSignal: DecisionSignal | null = null;
 
-    if (this.options.jevProvider) {
+    if (this.options.decisionModelProvider) {
       try {
-        jevSignal = await this.options.jevProvider.evaluate({
+        modelSignal = await this.options.decisionModelProvider.evaluate({
           cart,
           rules,
           budgets,
           deterministicLane: deterministicLane ?? "L0",
         });
       } catch (error) {
-        this.options.onJevError?.(error);
+        this.options.onDecisionModelError?.(error);
       }
     }
 
-    const policyLane = jevSignal
-      ? maxLane(deterministicLane ?? "L0", jevSignal.lane)
-      : deterministicLane ?? (this.options.jevProvider ? "L0" : null);
+    const policyLane = modelSignal
+      ? maxLane(deterministicLane ?? "L0", modelSignal.lane)
+      : deterministicLane ?? (this.options.decisionModelProvider ? "L0" : null);
     const verdict = policyLane
       ? createPolicyVerdict(cart, userId, policyLane, version)
       : createStubVerdict(cart, userId);
@@ -79,15 +79,15 @@ export class DecisionService {
       cart,
       verdict,
       policyVersion: version,
-      modelProvider: jevSignal
-        ? "typesafe-jev"
-        : this.options.jevProvider
-          ? "jev-fallback"
+      modelProvider: modelSignal
+        ? "cloudflare-clef"
+        : this.options.decisionModelProvider
+          ? "model-fallback"
           : hasPolicyData
             ? "policy-engine"
             : "stub",
-      modelVersion: jevSignal?.model ?? (hasPolicyData ? "v1" : "deterministic-v1"),
-      ...(jevSignal ? { modelOutput: jevSignal } : {}),
+      modelVersion: modelSignal?.model ?? (hasPolicyData ? "v1" : "deterministic-v1"),
+      ...(modelSignal ? { modelOutput: modelSignal } : {}),
       expiresAt: expiresAt.toISOString(),
     });
 

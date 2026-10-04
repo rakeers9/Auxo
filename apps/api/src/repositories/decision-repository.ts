@@ -5,7 +5,7 @@ export interface DecisionRecord {
   cart: Cart;
   verdict: Verdict;
   policyVersion: string;
-  modelProvider: "stub" | "policy-engine" | "typesafe-jev" | "jev-fallback";
+  modelProvider: "stub" | "policy-engine" | "cloudflare-clef" | "model-fallback";
   modelVersion: string;
   modelOutput?: unknown;
   expiresAt: string;

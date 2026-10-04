@@ -9,7 +9,7 @@ import { SupabaseDecisionRepository } from "./repositories/supabase-decision-rep
 import { SupabaseOutcomeRepository } from "./repositories/supabase-outcome-repository.js";
 import { InMemorySettingsRepository } from "./repositories/settings-repository.js";
 import { SupabaseSettingsRepository } from "./repositories/supabase-settings-repository.js";
-import { TypeSafeJevProvider } from "./services/jev-provider.js";
+import { CloudflareClefProvider } from "./services/decision-model-provider.js";
 
 const config = loadConfig();
 
@@ -42,13 +42,13 @@ const app = await buildApp({
     ? new SupabaseSettingsRepository(serviceClient)
     : new InMemorySettingsRepository(),
   decisionTtlSeconds: config.decisionTtlSeconds,
-  ...(config.typesafeApiKey
+  ...(config.cloudflareAccountId && config.cloudflareApiToken
     ? {
-        jevProvider: new TypeSafeJevProvider({
-          apiKey: config.typesafeApiKey,
-          ...(config.typesafeBaseUrl ? { baseUrl: config.typesafeBaseUrl } : {}),
-          model: config.typesafeDefaultModel,
-          timeoutMs: config.jevTimeoutMs,
+        decisionModelProvider: new CloudflareClefProvider({
+          accountId: config.cloudflareAccountId,
+          apiToken: config.cloudflareApiToken,
+          model: config.clefModel,
+          timeoutMs: config.decisionModelTimeoutMs,
         }),
       }
     : {}),
