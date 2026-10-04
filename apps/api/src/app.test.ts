@@ -137,6 +137,52 @@ describe("POST /v1/decide", () => {
 
     expect(response.statusCode).toBe(401);
   });
+
+  it("evaluates stored rules when deciding", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    await app.inject({
+      method: "POST",
+      url: "/v1/rules",
+      payload: {
+        name: "Pause purchases over $20",
+        rule_type: "cart_total",
+        configuration: { threshold_minor: 2_000, lane: "L3" },
+        enabled: true,
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("0") },
+    });
+
+    expect(response.json()).toMatchObject({ lane: "L3", action: "block" });
+  });
+
+  it("evaluates the active budget when deciding", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    await app.inject({
+      method: "POST",
+      url: "/v1/budgets",
+      payload: {
+        currency: "USD",
+        limit_minor: 2_000,
+        period_start: "2026-01-01",
+        period_end: "2099-12-31",
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("0") },
+    });
+
+    expect(response.json()).toMatchObject({ lane: "L4", action: "block" });
+  });
 });
 
 describe("POST /v1/events", () => {

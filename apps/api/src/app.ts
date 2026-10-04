@@ -58,8 +58,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const corsOrigins = options.corsOrigins ?? [];
   const authRequired = options.authRequired ?? false;
   const decisionRepository = options.decisionRepository ?? new InMemoryDecisionRepository();
+  const settingsRepository = options.settingsRepository ?? new InMemorySettingsRepository();
   const decisionService = new DecisionService({
     repository: decisionRepository,
+    settingsRepository,
     ttlSeconds: options.decisionTtlSeconds ?? 86_400,
   });
   const outcomeService = new OutcomeService(
@@ -67,7 +69,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     options.outcomeRepository ?? new InMemoryOutcomeRepository(),
   );
   const settingsService = new SettingsService(
-    options.settingsRepository ?? new InMemorySettingsRepository(),
+    settingsRepository,
   );
 
   await app.register(cors, {

@@ -59,8 +59,8 @@ export class SupabaseDecisionRepository implements DecisionRepository {
         template_id: record.verdict.template_id,
         cooldown_seconds: record.verdict.cooldown_seconds,
         policy_version: record.policyVersion,
-        model_provider: "stub",
-        model_version: "deterministic-v1",
+        model_provider: record.modelProvider,
+        model_version: record.modelVersion,
         expires_at: record.expiresAt,
       },
       {

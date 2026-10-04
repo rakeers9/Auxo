@@ -5,6 +5,8 @@ export interface DecisionRecord {
   cart: Cart;
   verdict: Verdict;
   policyVersion: string;
+  modelProvider: "stub" | "policy-engine";
+  modelVersion: string;
   expiresAt: string;
 }
 

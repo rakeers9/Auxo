@@ -44,12 +44,26 @@ repository; it must never be included in extension code.
 - `PATCH /v1/budgets/:id`
 - `DELETE /v1/budgets/:id`
 
-`/v1/decide` currently uses a deterministic stub. The last hexadecimal digit of
-`cart_hash`, modulo five, selects L0 through L4. This lets extension developers
-reproduce every overlay state before the Jev integration is available.
+`/v1/decide` now loads the authenticated user's enabled rules and active budget
+before producing a verdict. The first policy engine supports:
 
-Within the configured decision TTL, the same authenticated user and cart hash
-reuse the stored decision instead of generating a second record.
+- `cart_total`: `configuration` contains `threshold_minor` and `lane`
+- `merchant`: `configuration` contains a `merchants` array and `lane`
+- `item_keyword`: `configuration` contains a `keywords` array and `lane`
+
+When multiple conditions match, the highest lane wins. An active same-currency
+budget raises the verdict to L2 at 75% projected usage, L3 at 90%, and L4 when
+the cart would exceed the limit. Unknown or malformed rule configurations are
+ignored safely.
+
+If the user has no rules or budgets, `/v1/decide` retains the deterministic
+stub: the last hexadecimal digit of `cart_hash`, modulo five, selects L0 through
+L4. This lets extension developers reproduce every overlay state before the Jev
+integration is available.
+
+Within the configured decision TTL, the same authenticated user, cart hash, and
+policy configuration reuse the stored decision. Changing a rule or budget
+automatically causes the cart to be evaluated again.
 
 Use hashes ending in `0`, `1`, `2`, `3`, or `4` to request L0, L1, L2, L3, or
 L4 while testing. The other 63 characters must also be hexadecimal.
@@ -127,7 +141,7 @@ Create a rule with `POST /v1/rules`:
 {
   "name": "Pause large purchases",
   "rule_type": "cart_total",
-  "configuration": { "threshold_minor": 10000 },
+  "configuration": { "threshold_minor": 10000, "lane": "L2" },
   "enabled": true
 }
 ```
