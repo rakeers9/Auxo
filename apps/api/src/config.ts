@@ -10,6 +10,9 @@ const EnvironmentSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   DECISION_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
+  PASS_TTL_SECONDS: z.coerce.number().int().positive().max(86_400).default(600),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().max(10_000).default(120),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().max(3_600_000).default(60_000),
   CLOUDFLARE_ACCOUNT_ID: z.string().min(1).optional(),
   CLOUDFLARE_API_TOKEN: z.string().min(1).optional(),
   CLEF_MODEL: z.enum(["clef", "clef-flash"]).default("clef"),
@@ -26,6 +29,9 @@ export interface ApiConfig {
   supabaseAnonKey: string | undefined;
   supabaseServiceRoleKey: string | undefined;
   decisionTtlSeconds: number;
+  passTtlSeconds: number;
+  rateLimitMax: number;
+  rateLimitWindowMs: number;
   cloudflareAccountId: string | undefined;
   cloudflareApiToken: string | undefined;
   clefModel: "clef" | "clef-flash";
@@ -77,6 +83,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     supabaseAnonKey: parsed.SUPABASE_ANON_KEY,
     supabaseServiceRoleKey: parsed.SUPABASE_SERVICE_ROLE_KEY,
     decisionTtlSeconds: parsed.DECISION_TTL_SECONDS,
+    passTtlSeconds: parsed.PASS_TTL_SECONDS,
+    rateLimitMax: parsed.RATE_LIMIT_MAX,
+    rateLimitWindowMs: parsed.RATE_LIMIT_WINDOW_MS,
     cloudflareAccountId: parsed.CLOUDFLARE_ACCOUNT_ID,
     cloudflareApiToken: parsed.CLOUDFLARE_API_TOKEN,
     clefModel: parsed.CLEF_MODEL,

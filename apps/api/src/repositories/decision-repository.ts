@@ -10,6 +10,13 @@ export interface DecisionRecord {
   modelOutput?: unknown;
   context: DecisionContext;
   expiresAt: string;
+  createdAt: string;
+}
+
+export interface OwnedDecision {
+  cart: Cart;
+  verdict: Verdict;
+  createdAt: string;
 }
 
 export interface DecisionRepository {
@@ -20,6 +27,7 @@ export interface DecisionRepository {
     now: Date,
   ): Promise<DecideResponse | null>;
   belongsToUser(userId: string, decisionId: string): Promise<boolean>;
+  findOwned(userId: string, decisionId: string): Promise<OwnedDecision | null>;
   save(record: DecisionRecord): Promise<void>;
 }
 
@@ -52,6 +60,13 @@ export class InMemoryDecisionRepository implements DecisionRepository {
     return [...this.records.values()].some(
       (record) => record.userId === userId && record.verdict.decision_id === decisionId,
     );
+  }
+
+  public async findOwned(userId: string, decisionId: string): Promise<OwnedDecision | null> {
+    const record = [...this.records.values()].find(
+      (candidate) => candidate.userId === userId && candidate.verdict.decision_id === decisionId,
+    );
+    return record ? { cart: record.cart, verdict: record.verdict, createdAt: record.createdAt } : null;
   }
 
   private key(userId: string, cartHash: string, policyVersion: string): string {

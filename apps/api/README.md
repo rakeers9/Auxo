@@ -35,6 +35,8 @@ repository; it must never be included in extension code.
 - `POST /v1/decide`
 - `POST /v1/events`
 - `POST /v1/check-ins`
+- `POST /v1/passes`
+- `GET /v1/passes/active?cart_hash=...`
 - `GET /v1/rules`
 - `POST /v1/rules`
 - `PATCH /v1/rules/:id`
@@ -77,6 +79,22 @@ the decision for later evaluation.
 
 `CLEF_MODEL` accepts `clef` (the default precision model) or `clef-flash` (the
 lower-latency model).
+
+## Checkout passes and safeguards
+
+For pause or block verdicts, `POST /v1/passes` accepts a `decision_id` after
+the verdict cooldown has elapsed. It returns a short-lived, user-scoped pass
+for that exact cart hash and merchant. The extension can query
+`GET /v1/passes/active?cart_hash=...` before lifting checkout blocking. Passes
+are idempotent per decision and default to a ten-minute lifetime.
+
+The API limits request bodies to 64 KiB and applies a configurable per-instance
+rate limit. Set `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS`, and `PASS_TTL_SECONDS`
+to override the defaults.
+
+Run `pnpm eval:policy` to evaluate the deterministic policy against 100 labeled
+synthetic carts. The command reports accuracy and a lane confusion matrix and
+fails when accuracy drops below 95%.
 
 Within the configured decision TTL, the same authenticated user, cart hash, and
 policy configuration reuse the stored decision. Changing a rule or budget

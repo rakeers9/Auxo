@@ -199,6 +199,18 @@ describe("POST /v1/decide", () => {
   });
 });
 
+describe("API safeguards", () => {
+  it("rate limits repeated API requests while keeping health available", async () => {
+    const app = await buildApp({ rateLimitMax: 1, rateLimitWindowMs: 60_000 });
+    openApps.push(app);
+    expect((await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("0") } })).statusCode).toBe(200);
+    const limited = await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("1") } });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+    expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
+  });
+});
+
 describe("POST /v1/events", () => {
   it("stores an event once and treats a replay as a duplicate", async () => {
     const app = await buildApp();

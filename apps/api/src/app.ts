@@ -3,6 +3,8 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
 import {
   CheckInSchema,
+  ActivePassQuerySchema,
+  CreatePassRequestSchema,
   CreateBudgetSchema,
   CreateRuleSchema,
   DecideRequestSchema,
@@ -29,6 +31,8 @@ import {
 } from "./repositories/settings-repository.js";
 import { SettingNotFoundError, SettingsService } from "./services/settings-service.js";
 import type { DecisionModelProvider } from "./services/decision-model-provider.js";
+import { InMemoryPassRepository, type PassRepository } from "./repositories/pass-repository.js";
+import { PassNotAvailableError, PassService } from "./services/pass-service.js";
 
 const DEVELOPMENT_USER_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -42,6 +46,10 @@ export interface BuildAppOptions {
   settingsRepository?: SettingsRepository;
   decisionTtlSeconds?: number;
   decisionModelProvider?: DecisionModelProvider;
+  passRepository?: PassRepository;
+  passTtlSeconds?: number;
+  rateLimitMax?: number;
+  rateLimitWindowMs?: number;
 }
 
 function bearerToken(request: FastifyRequest): string | null {
@@ -56,7 +64,7 @@ function bearerToken(request: FastifyRequest): string | null {
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 64 * 1024 });
   const corsOrigins = options.corsOrigins ?? [];
   const authRequired = options.authRequired ?? false;
   const decisionRepository = options.decisionRepository ?? new InMemoryDecisionRepository();
@@ -78,6 +86,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const settingsService = new SettingsService(
     settingsRepository,
   );
+  const passService = new PassService(
+    decisionRepository,
+    options.passRepository ?? new InMemoryPassRepository(),
+    options.passTtlSeconds ?? 600,
+  );
+  const rateLimitMax = options.rateLimitMax ?? 120;
+  const rateLimitWindowMs = options.rateLimitWindowMs ?? 60_000;
+  const requestWindows = new Map<string, { startedAt: number; count: number }>();
 
   await app.register(cors, {
     origin: corsOrigins.length === 0 ? true : corsOrigins,
@@ -125,6 +141,25 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
     const verdict = await decisionService.decide(user.id, parsed.data.cart);
     return reply.status(200).send(verdict);
+  });
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url === "/health") return;
+    const now = Date.now();
+    if (requestWindows.size > 10_000) {
+      for (const [key, value] of requestWindows) {
+        if (now - value.startedAt >= rateLimitWindowMs) requestWindows.delete(key);
+      }
+    }
+    const current = requestWindows.get(request.ip);
+    const window = !current || now - current.startedAt >= rateLimitWindowMs
+      ? { startedAt: now, count: 1 }
+      : { ...current, count: current.count + 1 };
+    requestWindows.set(request.ip, window);
+    if (window.count > rateLimitMax) {
+      reply.header("retry-after", Math.max(1, Math.ceil((window.startedAt + rateLimitWindowMs - now) / 1_000)));
+      return reply.status(429).send({ error: { code: "RATE_LIMITED", message: "Too many requests. Try again shortly." } });
+    }
   });
 
   app.post("/v1/events", async (request, reply) => {
@@ -181,6 +216,22 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
     const receipt = await outcomeService.recordCheckIn(user.id, parsed.data);
     return reply.status(receipt.duplicate ? 200 : 201).send(receipt);
+  });
+
+  app.post("/v1/passes", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const parsed = CreatePassRequestSchema.safeParse(request.body);
+    if (!parsed.success) return invalidRequest(reply, "The pass request is invalid.", parsed.error.flatten());
+    return reply.status(201).send(await passService.issue(user.id, parsed.data.decision_id));
+  });
+
+  app.get("/v1/passes/active", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const parsed = ActivePassQuerySchema.safeParse(request.query);
+    if (!parsed.success) return invalidRequest(reply, "The active pass query is invalid.", parsed.error.flatten());
+    return reply.send({ pass: await passService.active(user.id, parsed.data.cart_hash) });
   });
 
   const IdParamsSchema = z.object({ id: z.string().uuid() }).strict();
@@ -282,6 +333,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
           code: "SETTING_NOT_FOUND",
           message: "The setting does not exist for the authenticated user.",
         },
+      });
+    }
+
+    if (error instanceof PassNotAvailableError) {
+      return reply.status(409).send({
+        error: { code: "PASS_NOT_AVAILABLE", message: error.message },
       });
     }
 

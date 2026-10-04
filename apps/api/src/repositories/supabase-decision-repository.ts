@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DecisionContextSchema, VerdictSchema, type DecideResponse } from "@auxo/shared";
 
-import type { DecisionRecord, DecisionRepository } from "./decision-repository.js";
+import type { DecisionRecord, DecisionRepository, OwnedDecision } from "./decision-repository.js";
 
 interface DecisionRow {
   id: string;
@@ -90,5 +90,27 @@ export class SupabaseDecisionRepository implements DecisionRepository {
     }
 
     return data !== null;
+  }
+
+  public async findOwned(userId: string, decisionId: string): Promise<OwnedDecision | null> {
+    const { data, error } = await this.client
+      .from("decisions")
+      .select("id,cart,lane,action,template_id,cooldown_seconds,created_at")
+      .eq("id", decisionId)
+      .eq("user_id", userId)
+      .maybeSingle<DecisionRow & { cart: unknown; created_at: string }>();
+    if (error) throw new Error("Unable to load the decision.", { cause: error });
+    if (!data) return null;
+    return {
+      cart: data.cart as OwnedDecision["cart"],
+      verdict: VerdictSchema.parse({
+        decision_id: data.id,
+        lane: data.lane,
+        action: data.action,
+        template_id: data.template_id,
+        cooldown_seconds: data.cooldown_seconds,
+      }),
+      createdAt: data.created_at,
+    };
   }
 }

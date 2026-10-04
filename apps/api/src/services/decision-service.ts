@@ -98,6 +98,7 @@ export class DecisionService {
       ...(modelSignal ? { modelOutput: modelSignal } : {}),
       context,
       expiresAt: expiresAt.toISOString(),
+      createdAt: now.toISOString(),
     });
 
     return { ...verdict, context };
