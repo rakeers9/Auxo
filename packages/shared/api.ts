@@ -1,10 +1,13 @@
 import { z } from "zod";
 
 import { CartSchema } from "./cart.js";
+import { DecisionContextSchema } from "./decision-context.js";
 import { VerdictSchema } from "./verdict.js";
 
 export const DecideRequestSchema = z.object({ cart: CartSchema }).strict();
-export const DecideResponseSchema = VerdictSchema;
+export const DecideResponseSchema = VerdictSchema.extend({
+  context: DecisionContextSchema,
+}).strict();
 
 export const OutcomeReceiptSchema = z
   .object({

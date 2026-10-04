@@ -1,4 +1,4 @@
-import type { Cart, Verdict } from "@auxo/shared";
+import type { Cart, DecideResponse, DecisionContext, Verdict } from "@auxo/shared";
 
 export interface DecisionRecord {
   userId: string;
@@ -8,6 +8,7 @@ export interface DecisionRecord {
   modelProvider: "stub" | "policy-engine" | "cloudflare-clef" | "model-fallback";
   modelVersion: string;
   modelOutput?: unknown;
+  context: DecisionContext;
   expiresAt: string;
 }
 
@@ -17,7 +18,7 @@ export interface DecisionRepository {
     cartHash: string,
     policyVersion: string,
     now: Date,
-  ): Promise<Verdict | null>;
+  ): Promise<DecideResponse | null>;
   belongsToUser(userId: string, decisionId: string): Promise<boolean>;
   save(record: DecisionRecord): Promise<void>;
 }
@@ -30,14 +31,14 @@ export class InMemoryDecisionRepository implements DecisionRepository {
     cartHash: string,
     policyVersion: string,
     now: Date,
-  ): Promise<Verdict | null> {
+  ): Promise<DecideResponse | null> {
     const record = this.records.get(this.key(userId, cartHash, policyVersion));
 
     if (!record || new Date(record.expiresAt) <= now) {
       return null;
     }
 
-    return record.verdict;
+    return { ...record.verdict, context: record.context };
   }
 
   public async save(record: DecisionRecord): Promise<void> {

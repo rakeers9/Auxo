@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { Budget, Cart, Lane, Rule, Verdict, VerdictAction } from "@auxo/shared";
+import type { Budget, Cart, DecisionReasonCode, Lane, Rule, Verdict, VerdictAction } from "@auxo/shared";
 
 const LANE_RANK: Record<Lane, number> = { L0: 0, L1: 1, L2: 2, L3: 3, L4: 4 };
 const LANE_POLICY: Record<
@@ -21,12 +21,33 @@ export interface PolicyState {
   now: Date;
 }
 
+export interface PolicyFactor {
+  code: DecisionReasonCode;
+  source: "rule" | "budget" | "policy";
+  lane: Lane;
+  rule?: Rule;
+  budget?: Budget;
+}
+
+export interface PolicyEvaluation {
+  lane: Lane;
+  factors: PolicyFactor[];
+}
+
 export function evaluatePolicy(state: PolicyState): Lane {
+  return evaluatePolicyWithContext(state).lane;
+}
+
+export function evaluatePolicyWithContext(state: PolicyState): PolicyEvaluation {
   let lane: Lane = "L0";
+  const factors: PolicyFactor[] = [];
 
   for (const rule of state.rules.filter((candidate) => candidate.enabled)) {
     const matchedLane = evaluateRule(rule, state.cart);
-    if (matchedLane) lane = maxLane(lane, matchedLane);
+    if (matchedLane) {
+      lane = maxLane(lane, matchedLane);
+      factors.push({ code: `rule.${rule.rule_type}` as DecisionReasonCode, source: "rule", lane: matchedLane, rule });
+    }
   }
 
   const budgets = state.budgets.filter(
@@ -38,15 +59,21 @@ export function evaluatePolicy(state: PolicyState): Lane {
 
   for (const budget of budgets) {
     const projected = budget.spent_minor + state.cart.total_minor;
-    if (projected > budget.limit_minor) lane = maxLane(lane, "L4");
+    if (projected > budget.limit_minor) {
+      lane = maxLane(lane, "L4");
+      factors.push({ code: "budget.exceeded", source: "budget", lane: "L4", budget });
+    }
     else if (budget.limit_minor > 0 && projected >= budget.limit_minor * 0.9) {
       lane = maxLane(lane, "L3");
+      factors.push({ code: "budget.critical", source: "budget", lane: "L3", budget });
     } else if (budget.limit_minor > 0 && projected >= budget.limit_minor * 0.75) {
       lane = maxLane(lane, "L2");
+      factors.push({ code: "budget.warning", source: "budget", lane: "L2", budget });
     }
   }
 
-  return lane;
+  if (factors.length === 0) factors.push({ code: "no_policy_match", source: "policy", lane: "L0" });
+  return { lane, factors };
 }
 
 export function createPolicyVerdict(

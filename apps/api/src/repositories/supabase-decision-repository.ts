@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { VerdictSchema, type Verdict } from "@auxo/shared";
+import { DecisionContextSchema, VerdictSchema, type DecideResponse } from "@auxo/shared";
 
 import type { DecisionRecord, DecisionRepository } from "./decision-repository.js";
 
@@ -10,6 +10,7 @@ interface DecisionRow {
   action: string;
   template_id: string;
   cooldown_seconds: number;
+  decision_context: unknown;
 }
 
 export class SupabaseDecisionRepository implements DecisionRepository {
@@ -20,10 +21,10 @@ export class SupabaseDecisionRepository implements DecisionRepository {
     cartHash: string,
     policyVersion: string,
     now: Date,
-  ): Promise<Verdict | null> {
+  ): Promise<DecideResponse | null> {
     const { data, error } = await this.client
       .from("decisions")
-      .select("id,lane,action,template_id,cooldown_seconds")
+      .select("id,lane,action,template_id,cooldown_seconds,decision_context")
       .eq("user_id", userId)
       .eq("cart_hash", cartHash)
       .eq("policy_version", policyVersion)
@@ -38,13 +39,14 @@ export class SupabaseDecisionRepository implements DecisionRepository {
       return null;
     }
 
-    return VerdictSchema.parse({
+    const verdict = VerdictSchema.parse({
       decision_id: data.id,
       lane: data.lane,
       action: data.action,
       template_id: data.template_id,
       cooldown_seconds: data.cooldown_seconds,
     });
+    return { ...verdict, context: DecisionContextSchema.parse(data.decision_context) };
   }
 
   public async save(record: DecisionRecord): Promise<void> {
@@ -62,6 +64,7 @@ export class SupabaseDecisionRepository implements DecisionRepository {
         model_provider: record.modelProvider,
         model_version: record.modelVersion,
         model_output: record.modelOutput ?? null,
+        decision_context: record.context,
         expires_at: record.expiresAt,
       },
       {

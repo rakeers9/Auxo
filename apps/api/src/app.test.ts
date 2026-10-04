@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { VerdictSchema } from "@auxo/shared";
+import { DecideResponseSchema } from "@auxo/shared";
 
 import { buildApp } from "./app.js";
 import type { AuthService } from "./auth/auth-service.js";
@@ -55,7 +55,7 @@ describe("POST /v1/decide", () => {
     const body = response.json();
 
     expect(response.statusCode).toBe(200);
-    expect(VerdictSchema.safeParse(body).success).toBe(true);
+    expect(DecideResponseSchema.safeParse(body).success).toBe(true);
     expect(body).toMatchObject({
       lane,
       action,
@@ -120,7 +120,7 @@ describe("POST /v1/decide", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(VerdictSchema.safeParse(response.json()).success).toBe(true);
+    expect(DecideResponseSchema.safeParse(response.json()).success).toBe(true);
   });
 
   it("rejects an invalid bearer token", async () => {
@@ -158,7 +158,14 @@ describe("POST /v1/decide", () => {
       payload: { cart: cartWithHashSuffix("0") },
     });
 
-    expect(response.json()).toMatchObject({ lane: "L3", action: "block" });
+    expect(response.json()).toMatchObject({
+      lane: "L3",
+      action: "block",
+      context: {
+        matched_rules: [{ name: "Pause purchases over $20", lane: "L3" }],
+        decisive_factors: [{ code: "rule.cart_total", source: "rule", lane: "L3" }],
+      },
+    });
   });
 
   it("evaluates the active budget when deciding", async () => {
@@ -181,7 +188,14 @@ describe("POST /v1/decide", () => {
       payload: { cart: cartWithHashSuffix("0") },
     });
 
-    expect(response.json()).toMatchObject({ lane: "L4", action: "block" });
+    expect(response.json()).toMatchObject({
+      lane: "L4",
+      action: "block",
+      context: {
+        budget: { limit_minor: 2_000, projected_minor: 2_500, would_exceed: true },
+        decisive_factors: [{ code: "budget.exceeded", source: "budget", lane: "L4" }],
+      },
+    });
   });
 });
 
