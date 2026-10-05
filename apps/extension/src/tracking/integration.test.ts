@@ -184,7 +184,7 @@ describe("cart sidebar on a real product page", () => {
     const setSubtotal = (text: string) => {
       document.querySelector("#nav-flyout-ewc .ewc-subtotal-amount h2")!.textContent = text;
     };
-    return { memory, events, decided, stop, flush, line, setSubtotal };
+    return { memory, events, decided, stop, flush, line, setSubtotal, handler };
   }
 
   it("links a sidebar removal to the earlier decision about that item", async () => {
@@ -214,6 +214,32 @@ describe("cart sidebar on a real product page", () => {
     expect(s.decided).toHaveLength(1);
     expect(s.decided[0]!.trigger).toMatchObject({ intent: "remove_item", source: "page", page_type: "product" });
     expect(s.decided[0]!.cart).toMatchObject({ items: [{ name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 }] });
+    s.stop();
+    vi.useRealTimers();
+  });
+
+  it("a real + click in the sidebar labels the next change as increase_qty", async () => {
+    const s = await setupSidebar();
+    const handler = s.handler;
+    const stopClicks = listenForBuyIntents(
+      document,
+      { classifyClick, classifySubmit },
+      (signal) => handler.noteEditClick(signal),
+      () => url,
+    );
+    const mugs = document.querySelector('#nav-flyout-ewc .ewc-item[data-price="9.99"]') ?? s.line("B0TEST0006");
+    const plus = mugs.querySelector('[data-action="a-stepper-increment"]');
+    expect(plus, "the real sidebar has a + stepper").not.toBeNull();
+    plus!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    // What Amazon does next: the quantity and subtotal update.
+    mugs.setAttribute("data-quantity", "4");
+    s.setSubtotal("$79.95");
+    await s.flush();
+
+    expect(s.decided).toHaveLength(1);
+    expect(s.decided[0]!.trigger).toMatchObject({ intent: "increase_qty", source: "known", page_type: "product" });
+    stopClicks();
     s.stop();
     vi.useRealTimers();
   });

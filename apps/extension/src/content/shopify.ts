@@ -1,7 +1,7 @@
 import type { StoreOverrides } from "@auxo/shared";
 
 import { readShopifyCart, shopifyPageType } from "../cart";
-import { classifyClick, classifySubmit } from "../clicks";
+import { classifyChange, classifyClick, classifySubmit } from "../clicks";
 import type { CartDraft, PageInspection } from "../messages";
 import { watchCartApi } from "../tracking/cart-api-watch";
 import type { StoreAdapter } from "./runtime";
@@ -54,6 +54,7 @@ export function createShopifyAdapter(deps: { fetch: typeof fetch; location: () =
     classifyClick: (target, url, overrides: StoreOverrides | null) => classifyClick(target, url, overrides?.buttons, "shopify"),
     classifySubmit: (form, submitter, url, overrides: StoreOverrides | null) =>
       classifySubmit(form, submitter, url, overrides?.buttons, "shopify"),
+    classifyChange: (target, url, overrides: StoreOverrides | null) => classifyChange(target, url, overrides?.buttons, "shopify"),
     watch: ({ miniCart, ignore }) => {
       const watcher = watchCartApi(deps.doc, async () => (await read()).draft, {
         onChange: (before, after, diff) => void miniCart.onChange(before, after, diff),

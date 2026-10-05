@@ -72,6 +72,8 @@ export interface StoreAdapter {
   panelSidebar?(overrides: StoreOverrides | null): { draft: CartDraft | null; problems: string[] } | null;
   classifyClick(target: EventTarget | null, url: URL, overrides: StoreOverrides | null): ClickSignal | null;
   classifySubmit(form: HTMLFormElement, submitter: Element | null, url: URL, overrides: StoreOverrides | null): ClickSignal | null;
+  // Quantity boxes and dropdowns change without a click.
+  classifyChange?(target: EventTarget | null, url: URL, overrides: StoreOverrides | null): ClickSignal | null;
   // Start noticing page and cart changes; returns a function that stops.
   watch(api: WatchApi): () => void;
 }
@@ -450,6 +452,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     {
       classifyClick: (target, url) => adapter.classifyClick(target, url, overrides),
       classifySubmit: (form, submitter, url) => adapter.classifySubmit(form, submitter, url, overrides),
+      classifyChange: (target, url) => adapter.classifyChange?.(target, url, overrides) ?? null,
     },
     (signal) => {
       if (ctx.isInvalid) return;

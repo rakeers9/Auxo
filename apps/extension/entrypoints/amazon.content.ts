@@ -1,7 +1,7 @@
 import { defineContentScript } from "wxt/utils/define-content-script";
 
 import { inspectAmazonPage, readAmazonMiniCart } from "../src/cart";
-import { classifyClick, classifySubmit } from "../src/clicks";
+import { classifyChange, classifyClick, classifySubmit } from "../src/clicks";
 import { startStore, type StoreAdapter } from "../src/content/runtime";
 import { MINI_CART, watchMiniCart } from "../src/tracking/sidesheet";
 import { watchForChanges } from "../src/watch";
@@ -19,6 +19,7 @@ const amazon: StoreAdapter = {
   },
   classifyClick: (target, url, overrides) => classifyClick(target, url, overrides?.buttons),
   classifySubmit: (form, submitter, url, overrides) => classifySubmit(form, submitter, url, overrides?.buttons),
+  classifyChange: (target, url, overrides) => classifyChange(target, url, overrides?.buttons),
   watch: ({ onPageChange, miniCart, overrides, loadedAs, ignore }) => {
     const stopPage = watchForChanges(document.body, onPageChange, { debounceMs: RECHECK_DEBOUNCE_MS, ignore });
     // The cart and checkout pages track removals themselves (the tracker), so
