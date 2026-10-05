@@ -19,9 +19,18 @@ export const KNOWN_CONTROLS: Record<string, KnownControl[]> = {
       selectors: ["#buy-now-button", 'input[name="submit.buy-now"]', '[id="submit.buy-now"]'],
     },
     // amazon-product.html: input#add-to-cart-button inside span#submit.add-to-cart.
+    // amazon-cart-saved-item.html, amazon-cart-empty.html: "Move to cart" on a
+    // saved-for-later item puts it back in the cart; its wrapper div holds
+    // only the button.
     {
       intent: "add_to_cart",
-      selectors: ["#add-to-cart-button", 'input[name="submit.add-to-cart"]', '[id="submit.add-to-cart"]'],
+      selectors: [
+        "#add-to-cart-button",
+        'input[name="submit.add-to-cart"]',
+        '[id="submit.add-to-cart"]',
+        'input[name="submit.move-to-cart"]',
+        '[data-feature-id="grid-view-move-to-cart"]',
+      ],
     },
     // amazon-cart*.html: the input has no id, only name and data-feature-id.
     {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import addedToCartHtml from "../cart/__fixtures__/amazon-added-to-cart.html?raw";
+import cartEmptyHtml from "../cart/__fixtures__/amazon-cart-empty.html?raw";
 import cartSavedItemHtml from "../cart/__fixtures__/amazon-cart-saved-item.html?raw";
 import cartHtml from "../cart/__fixtures__/amazon-cart.html?raw";
 import minicartHtml from "../cart/__fixtures__/amazon-product-minicart.html?raw";
@@ -148,9 +149,43 @@ describe("Amazon saved-for-later list (amazon-cart-saved-item.html)", () => {
     });
   });
 
-  it("Move to cart and Add to list are not cart edits", () => {
-    expect(classifyClick(find(doc, 'input[name="submit.move-to-cart"]'), AMAZON_CART)).toBeNull();
+  it("Add to list is nothing", () => {
     expect(classifyClick(find(doc, 'input[name="submit.add-to-list-popover"]'), AMAZON_CART)).toBeNull();
+  });
+});
+
+describe("Amazon saved list: Move to cart puts the item back in the cart (add_to_cart)", () => {
+  describe.each([
+    ["amazon-cart-saved-item.html", cartSavedItemHtml],
+    ["amazon-cart-empty.html", cartEmptyHtml],
+  ])("%s", (_name, html) => {
+    const doc = parse(html);
+    const input = find(doc, 'input[name="submit.move-to-cart"]');
+
+    it("the input is known add_to_cart, labeled from its value", () => {
+      expect(classifyClick(input, AMAZON_CART)).toEqual({ intent: "add_to_cart", source: "known", label: "Move to cart" });
+    });
+
+    it("a click on the button's inner text span is known add_to_cart", () => {
+      const wrapper = find(doc, '[data-feature-id="grid-view-move-to-cart"]');
+      const inner = find(wrapper, ".a-button-text");
+      expect(classifyClick(inner, AMAZON_CART)).toMatchObject({ intent: "add_to_cart", source: "known" });
+    });
+
+    it("submitting the saved list's form with it is known add_to_cart", () => {
+      const form = find(doc, "#savedCartViewForm") as HTMLFormElement;
+      expect(form.contains(input)).toBe(true);
+      expect(classifySubmit(form, input, AMAZON_CART)).toMatchObject({ intent: "add_to_cart", source: "known" });
+    });
+
+    it("its Delete stays ignored", () => {
+      expect(classifyClick(find(doc, 'input[name="submit.delete-saved"]'), AMAZON_CART)).toBeNull();
+    });
+  });
+
+  it("off Amazon, Move to cart is neither known nor guessed", () => {
+    const input = find(parse(cartSavedItemHtml), 'input[name="submit.move-to-cart"]');
+    expect(classifyClick(input, OTHER_HOST)).toBeNull();
   });
 });
 
