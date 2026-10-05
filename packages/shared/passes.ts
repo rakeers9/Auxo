@@ -14,5 +14,12 @@ export const CreatePassRequestSchema = z
   .object({ decision_id: z.string().uuid() })
   .strict();
 
+export const ActivePassQuerySchema = z.object({
+  cart_hash: z.string().regex(/^(?:sha256:)?[a-f0-9]{64}$/i),
+}).strict();
+
+export const ActivePassResponseSchema = z.object({ pass: PassSchema.nullable() }).strict();
+
 export type Pass = z.infer<typeof PassSchema>;
 export type CreatePassRequest = z.infer<typeof CreatePassRequestSchema>;
+export type ActivePassQuery = z.infer<typeof ActivePassQuerySchema>;

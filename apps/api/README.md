@@ -35,6 +35,8 @@ repository; it must never be included in extension code.
 - `POST /v1/decide`
 - `POST /v1/events`
 - `POST /v1/check-ins`
+- `POST /v1/passes`
+- `GET /v1/passes/active?cart_hash=...`
 - `GET /v1/rules`
 - `POST /v1/rules`
 - `PATCH /v1/rules/:id`
@@ -58,26 +60,41 @@ ignored safely.
 
 If the user has no rules or budgets, `/v1/decide` retains the deterministic
 stub: the last hexadecimal digit of `cart_hash`, modulo five, selects L0 through
-L4. This lets extension developers reproduce every overlay state before the Jev
-integration is available.
+L4. This lets extension developers reproduce every overlay state before the
+Cloudflare Clef integration is configured.
 
-## Jev decision signal
+## Cloudflare Clef decision signal
 
-Set `TYPESAFE_API_KEY` to enable TypeSafe AI's Jev decision model. The API sends
-the cart, enabled rules, budgets, and deterministic policy lane to one typed
-choice question. Jev returns L0 through L4 with calibrated probabilities and
-confidence; Auxo always selects the stricter of Jev and the deterministic
-policy, so Jev cannot weaken a hard rule or budget block.
+Set both `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` to enable Clef on
+Workers AI. The API sends the cart, enabled rules, budgets, and deterministic
+policy lane to one typed choice question. Clef returns L0 through L4 with
+probabilities and confidence; Auxo always selects the stricter of Clef and the
+deterministic policy, so the model cannot weaken a hard rule or budget block.
 
-The Jev request has a configurable short timeout (`JEV_TIMEOUT_MS`, 2000 ms by
-default), no automatic retries, and never exposes the key to the extension.
-Timeouts, provider errors, and invalid responses fall back to the deterministic
-engine. The selected model and structured Jev output are stored with the
-decision for later evaluation.
+The Clef request has a configurable short timeout (`DECISION_MODEL_TIMEOUT_MS`,
+2000 ms by default), no automatic retries, and never exposes the token to the
+extension. Timeouts, provider errors, and invalid responses fall back to the
+deterministic engine. The selected model and structured output are stored with
+the decision for later evaluation.
 
-Optional provider settings are `TYPESAFE_BASE_URL` and
-`TYPESAFE_DEFAULT_MODEL`; their defaults are the official TypeSafe API and
-`jev-latest`.
+`CLEF_MODEL` accepts `clef` (the default precision model) or `clef-flash` (the
+lower-latency model).
+
+## Checkout passes and safeguards
+
+For pause or block verdicts, `POST /v1/passes` accepts a `decision_id` after
+the verdict cooldown has elapsed. It returns a short-lived, user-scoped pass
+for that exact cart hash and merchant. The extension can query
+`GET /v1/passes/active?cart_hash=...` before lifting checkout blocking. Passes
+are idempotent per decision and default to a ten-minute lifetime.
+
+The API limits request bodies to 64 KiB and applies a configurable per-instance
+rate limit. Set `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_MS`, and `PASS_TTL_SECONDS`
+to override the defaults.
+
+Run `pnpm eval:policy` to evaluate the deterministic policy against 100 labeled
+synthetic carts. The command reports accuracy and a lane confusion matrix and
+fails when accuracy drops below 95%.
 
 Within the configured decision TTL, the same authenticated user, cart hash, and
 policy configuration reuse the stored decision. Changing a rule or budget
