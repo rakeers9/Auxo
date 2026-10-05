@@ -129,13 +129,25 @@ describe("createCartFlow", () => {
     expect(d.requestVerdict).not.toHaveBeenCalled();
   });
 
-  it("doesn't re-ask about the same cart without a new click", async () => {
+  it("re-sends the same cart, tagged same_cart, and leaves the decision to the backend", async () => {
     const d = deps();
     const flow = createCartFlow(d.deps);
 
     await flow.check();
-    expect(await flow.check()).toEqual({ status: "unchanged", pageType: "cart", draft, cartHash: HASH });
-    expect(d.requestVerdict).toHaveBeenCalledTimes(1);
+    const second = await flow.check();
+    expect(d.requestVerdict).toHaveBeenCalledTimes(2);
+    expect(d.requestVerdict.mock.calls[0]?.[1]).not.toHaveProperty("same_cart");
+    expect(d.requestVerdict.mock.calls[1]?.[1]).toMatchObject({ intent: "page_view", same_cart: true });
+    expect(second).toMatchObject({ status: "shown" });
+  });
+
+  it("a click is never tagged same_cart", async () => {
+    const d = deps();
+    const flow = createCartFlow(d.deps);
+
+    await flow.check();
+    await flow.check(click("checkout"));
+    expect(d.requestVerdict.mock.calls[1]?.[1]).not.toHaveProperty("same_cart");
   });
 
   it("re-asks about the same cart after a new click", async () => {

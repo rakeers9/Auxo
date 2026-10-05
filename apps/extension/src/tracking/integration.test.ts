@@ -9,6 +9,7 @@ import { classifyClick, classifySubmit } from "../clicks";
 import { createCartFlow } from "../flow";
 import type { DecideResult } from "../messages";
 import { listenForBuyIntents } from "./listener";
+import { createMiniCartHandler } from "./minicart-handler";
 import { createPendingStore } from "./pending";
 import { createTracker } from "./tracker";
 
@@ -41,11 +42,21 @@ function openPage(fixture: string, href: string) {
     }),
     show: () => {},
   });
+  // Cart page edits go through the same handler as the sidebar.
+  const cartHandler = createMiniCartHandler({
+    decisionFor: async () => null,
+    sendEvent: (e) => events.push(e),
+    decide: async (cart, trigger) => {
+      requests.push({ cart: { ...cart, cart_hash: "edit" }, trigger });
+      return verdict.decision_id;
+    },
+    pageType: () => inspectAmazonPage(document, url()).pageType,
+  });
   const tracker = createTracker({
     flow,
     pending: createPendingStore(sessionStorage),
     inspect: () => inspectAmazonPage(document, url()),
-    sendEvent: (e) => events.push(e),
+    onCartDiff: (before, after, diff) => cartHandler.onChange(before, after, diff, "cart_page"),
   });
   const intents: Array<Promise<unknown>> = [];
   const stop = listenForBuyIntents(document, { classifyClick, classifySubmit }, (s) => intents.push(tracker.onBuyIntent(s)), url);
@@ -142,8 +153,15 @@ describe("click tracking on real Amazon pages", () => {
     await page.tracker.onPageChange();
 
     expect(page.events).toHaveLength(1);
-    expect(page.events[0]).toMatchObject({ decision_id: verdict.decision_id, action: "removed" });
-    expect(page.requests).toHaveLength(2); // the changed cart is asked about again
+    expect(page.events[0]).toMatchObject({
+      decision_id: verdict.decision_id,
+      action: "removed",
+      metadata: { source: "cart_page", intent: "remove_item", precursor_decision_id: null },
+    });
+    // 1: the cart on load, 2: the removal itself, 3: the changed cart re-checked.
+    expect(page.requests).toHaveLength(3);
+    expect(page.requests[1]!.trigger).toMatchObject({ intent: "remove_item", page_type: "cart" });
+    expect(page.requests[2]!.trigger).toMatchObject({ intent: "page_view", page_type: "cart" });
     page.stop();
   });
 });
@@ -169,7 +187,10 @@ describe("cart sidebar on a real product page", () => {
     const handler = createMiniCartHandler({
       decisionFor: (items) => memory.decisionFor(items),
       sendEvent: (e) => events.push(e),
-      decide: async (cart, trigger) => void decided.push({ cart, trigger }),
+      decide: async (cart, trigger) => {
+        decided.push({ cart, trigger });
+        return `22222222-2222-4222-8222-22222222222${decided.length}`;
+      },
       pageType: () => inspectAmazonPage(document, url).pageType,
     });
     const stop = watchMiniCart(document, () => readAmazonMiniCart(document, url).draft, {
@@ -206,9 +227,10 @@ describe("cart sidebar on a real product page", () => {
 
     expect(s.events).toHaveLength(1);
     expect(s.events[0]).toMatchObject({
-      decision_id: "11111111-1111-4111-8111-111111111111",
+      // Sent against the removal's own decision; the earlier one is the precursor.
+      decision_id: "22222222-2222-4222-8222-222222222221",
       action: "removed",
-      metadata: { removed: [{ name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 }], source: "mini_cart", page_type: "product" },
+      metadata: { removed: [{ name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 }], source: "mini_cart", precursor_decision_id: "11111111-1111-4111-8111-111111111111", page_type: "product" },
     });
     // Every removal is also asked about, as a remove_item edit.
     expect(s.decided).toHaveLength(1);

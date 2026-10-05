@@ -18,7 +18,7 @@ const cart = (items: CartDraft["items"]): CartDraft => ({
 function setup(pageType: PageType = "product", decisionId: string | null = "dec-1") {
   const sent: DecisionEvent[] = [];
   const reports: SidebarReport[] = [];
-  const decide = vi.fn<(d: CartDraft, t: Trigger) => Promise<void>>().mockResolvedValue();
+  const decide = vi.fn<(d: CartDraft, t: Trigger) => Promise<string | null>>().mockResolvedValue("own-1");
   const decisionFor = vi.fn().mockResolvedValue(decisionId);
   const handler = createMiniCartHandler({
     decisionFor,
@@ -32,7 +32,7 @@ function setup(pageType: PageType = "product", decisionId: string | null = "dec-
 }
 
 describe("createMiniCartHandler: removals", () => {
-  it("asks the backend about every removal, and links it to the earlier decision too", async () => {
+  it("asks the backend about every removal and sends 'removed' against that decision, with the precursor", async () => {
     const t = setup();
     await t.handler.onChange(cart([mug, lamp]), cart([mug]), { removed: [lamp], added: [] });
 
@@ -42,19 +42,43 @@ describe("createMiniCartHandler: removals", () => {
     );
     expect(t.sent).toHaveLength(1);
     expect(t.sent[0]).toMatchObject({
-      decision_id: "dec-1",
+      decision_id: "own-1",
       action: "removed",
-      metadata: { removed: [lamp], before_total_minor: 6396, after_total_minor: 2997, source: "mini_cart" },
+      metadata: {
+        removed: [lamp],
+        before_total_minor: 6396,
+        after_total_minor: 2997,
+        source: "mini_cart",
+        intent: "remove_item",
+        precursor_decision_id: "dec-1",
+      },
     });
   });
 
-  it("still asks the backend when no earlier decision covered the item", async () => {
+  it("tracks a removal no earlier decision covered, with an empty precursor", async () => {
     const t = setup("other", null);
     await t.handler.onChange(cart([mug, lamp]), cart([mug]), { removed: [lamp], added: [] });
 
+    expect(t.sent).toHaveLength(1);
+    expect(t.sent[0]).toMatchObject({ decision_id: "own-1", action: "removed", metadata: { precursor_decision_id: null } });
+    expect(t.reports[0]).toMatchObject({ linkedDecision: null, removedEventDecision: "own-1", removeIntent: "remove_item" });
+  });
+
+  it("falls back to the precursor when the backend can't be reached", async () => {
+    const t = setup("product", "dec-1");
+    t.decide.mockResolvedValue(null);
+    await t.handler.onChange(cart([mug, lamp]), cart([mug]), { removed: [lamp], added: [] });
+
+    expect(t.sent[0]).toMatchObject({ decision_id: "dec-1", metadata: { precursor_decision_id: "dec-1" } });
+  });
+
+  it("sends nothing only when there's no decision at all (backend down, no precursor)", async () => {
+    const t = setup("product", null);
+    t.decide.mockResolvedValue(null);
+    await t.handler.onChange(cart([mug, lamp]), cart([mug]), { removed: [lamp], added: [] });
+
     expect(t.sent).toEqual([]);
-    expect(t.decide).toHaveBeenCalledTimes(1);
-    expect(t.reports[0]).toMatchObject({ linkedDecision: null, removeIntent: "remove_item" });
+    expect(t.reports[0]).toMatchObject({ removedEventDecision: null });
   });
 
   it("calls a lower quantity decrease_qty when no click says otherwise", async () => {
@@ -144,7 +168,15 @@ describe("createMiniCartHandler: both at once", () => {
     expect(t.sent).toHaveLength(1);
     expect(t.decide).toHaveBeenCalledTimes(2);
     expect(t.reports).toEqual([
-      { removed: [mug], added: [lamp], linkedDecision: "dec-1", askedAbout: [lamp], removeIntent: "remove_item", addIntent: "add_to_cart" },
+      {
+        removed: [mug],
+        added: [lamp],
+        linkedDecision: "dec-1",
+        removedEventDecision: "own-1",
+        askedAbout: [lamp],
+        removeIntent: "remove_item",
+        addIntent: "add_to_cart",
+      },
     ]);
   });
 });

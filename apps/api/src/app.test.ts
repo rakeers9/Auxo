@@ -125,6 +125,18 @@ describe("POST /v1/decide", () => {
     expect(decisionRepository.list()[0]?.trigger).toEqual(trigger);
   });
 
+  it("accepts and stores the same_cart tag", async () => {
+    const decisionRepository = new InMemoryDecisionRepository();
+    const app = await buildApp({ decisionRepository });
+    openApps.push(app);
+    const trigger = { intent: "page_view", source: "page", page_type: "cart", occurred_at: "2026-10-05T18:00:00.000Z", same_cart: true };
+
+    const response = await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("1"), trigger } });
+
+    expect(response.statusCode).toBe(200);
+    expect(decisionRepository.list()[0]?.trigger).toEqual(trigger);
+  });
+
   it("still accepts a decide request without a trigger", async () => {
     const decisionRepository = new InMemoryDecisionRepository();
     const app = await buildApp({ decisionRepository });

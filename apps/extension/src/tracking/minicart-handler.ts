@@ -11,20 +11,26 @@ export interface MiniCartHandlerDeps {
   sendEvent(event: DecisionEvent): void;
   // Ask the backend about a cart edit. `draft` holds the items the edit was
   // about (what was added, or what was taken out); the caller decides whether
-  // to show the answer (never for edits that lower spending).
-  decide(draft: CartDraft, trigger: Trigger): Promise<void>;
+  // to show the answer (never for edits that lower spending). Resolves to the
+  // new decision's id, or null if the backend couldn't be reached.
+  decide(draft: CartDraft, trigger: Trigger): Promise<string | null>;
   pageType(): PageType;
   now?: () => Date;
   // What happened with each change, for the debug panel.
   report?(report: SidebarReport): void;
+  // Where changes come from, recorded on "removed" events (default mini_cart).
+  source?: string;
 }
 
 export interface SidebarReport {
   removed: RemovedItem[];
   added: RemovedItem[];
-  // For removals: the earlier decision the removal was also linked to (a
-  // "removed" event), or null if none covered those items.
+  // For removals: the earlier decision about those items (the precursor), or
+  // null if none covered them.
   linkedDecision: string | null;
+  // For removals: the decision the "removed" event was sent against (the
+  // removal's own decision, else the precursor), or null if neither existed.
+  removedEventDecision: string | null;
   // Added items asked about (after subtracting a clicked add that was
   // already decided at the click).
   askedAbout: RemovedItem[];
@@ -41,7 +47,8 @@ export interface MiniCartHandler {
   // items weren't read at the click, +, −, delete, save for later): the next
   // matching change is credited to it in the trigger.
   noteEditClick(signal: ClickSignal): void;
-  onChange(before: CartDraft, after: CartDraft, diff: MiniCartDiff): Promise<void>;
+  // `source` says where the change was seen (default: deps.source, else mini_cart).
+  onChange(before: CartDraft, after: CartDraft, diff: MiniCartDiff, source?: string): Promise<void>;
 }
 
 const ADDING = new Set<TriggerIntent>(["add_to_cart", "increase_qty"]);
@@ -89,34 +96,42 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
       clicked.push(...draft.items.map((item) => ({ ...item })));
     },
 
-    async onChange(before, after, diff) {
+    async onChange(before, after, diff, source) {
       let linkedDecision: string | null = null;
+      let removedEventDecision: string | null = null;
       let removeIntent: TriggerIntent | null = null;
       if (diff.removed.length > 0) {
+        // The earlier decision about these items, if any (the precursor).
         linkedDecision = await deps.decisionFor(diff.removed);
-        if (linkedDecision) {
+        // Gone entirely vs. a lower quantity, when no click says which.
+        const goneEntirely = diff.removed.every((r) => !after.items.some((i) => i.name === r.name && i.price_minor === r.price_minor));
+        const trigger = triggerFor(removeClick, goneEntirely ? "remove_item" : "decrease_qty");
+        removeClick = null;
+        removeIntent = trigger.intent;
+        // Every removal is asked about, so it's tracked even when nothing
+        // earlier covered it; the "removed" event hangs off that decision.
+        const ownDecision = await deps.decide(draftOf(diff.removed, before), trigger);
+        removedEventDecision = ownDecision ?? linkedDecision;
+        if (removedEventDecision) {
           deps.sendEvent(
             buildDecisionEvent(
-              linkedDecision,
+              removedEventDecision,
               "removed",
               {
                 removed: diff.removed.map((item) => ({ ...item })),
                 before_total_minor: before.total_minor,
                 after_total_minor: after.total_minor,
                 currency: after.currency,
-                source: "mini_cart",
+                source: source ?? deps.source ?? "mini_cart",
                 page_type: deps.pageType(),
+                intent: trigger.intent,
+                // The earlier decision about these items, or null if there wasn't one.
+                precursor_decision_id: linkedDecision,
               },
               now(),
             ),
           );
         }
-        // Gone entirely vs. a lower quantity, when no click says which.
-        const goneEntirely = diff.removed.every((r) => !after.items.some((i) => i.name === r.name && i.price_minor === r.price_minor));
-        const trigger = triggerFor(removeClick, goneEntirely ? "remove_item" : "decrease_qty");
-        removeClick = null;
-        removeIntent = trigger.intent;
-        await deps.decide(draftOf(diff.removed, before), trigger);
       }
 
       const { remaining, unused } = subtract(diff.added, clicked);
@@ -129,7 +144,15 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
         await deps.decide(draftOf(remaining, after), trigger);
       }
 
-      deps.report?.({ removed: diff.removed, added: diff.added, linkedDecision, askedAbout: remaining, removeIntent, addIntent });
+      deps.report?.({
+        removed: diff.removed,
+        added: diff.added,
+        linkedDecision,
+        removedEventDecision,
+        askedAbout: remaining,
+        removeIntent,
+        addIntent,
+      });
     },
   };
 }

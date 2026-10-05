@@ -248,8 +248,10 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     removeOverlay();
     if (DEBUG) return; // the debug panel shows the verdict instead
     if (verdict.lane === "L0") return; // silent pass
-    // Putting things back is recorded, never paused.
-    if (trigger && REDUCING.has(trigger.intent)) return;
+    // Putting things back is recorded, never paused. A repeat of the same
+    // cart doesn't re-open a pause the user already answered. A place-order
+    // click that got this far already passed the click gate.
+    if (trigger && (REDUCING.has(trigger.intent) || trigger.same_cart || trigger.intent === "place_order")) return;
 
     const next = await createShadowRootUi(ctx, {
       name: "auxo-overlay",
@@ -299,9 +301,6 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       case "unreadable":
         backend = { status: "not_asked" };
         cartHash = null;
-        break;
-      case "unchanged":
-        cartHash = outcome.cartHash; // keep showing the last answer
         break;
       case "failed_open":
         if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
@@ -369,7 +368,11 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
           : { status: "failed_open", pageType: t.page_type, draft, cartHash, trigger: t, reason: result.reason },
       );
       refreshDebug();
-      if (result.ok) void show(result.verdict, t);
+      // On the cart and checkout pages, the whole-cart check right after the
+      // edit is the one shown; the edit itself is recorded only.
+      const onCartPage = t.page_type === "cart" || t.page_type === "checkout";
+      if (result.ok && !onCartPage) void show(result.verdict, t);
+      return result.ok ? result.verdict.decision_id : null;
     },
     pageType: () => lastInspection.pageType,
     report: (r) => {
@@ -377,9 +380,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       const parts: string[] = [];
       if (r.removed.length > 0) {
         parts.push(
-          `${r.removeIntent ?? "removed"} ${items(r.removed)}: asked the backend${
-            r.linkedDecision ? `; "removed" sent for decision ${r.linkedDecision}` : ""
-          }`,
+          `${r.removeIntent ?? "removed"} ${items(r.removed)}: asked the backend; ${
+            r.removedEventDecision ? `"removed" sent (decision ${r.removedEventDecision})` : `"removed" not sent (backend unreachable)`
+          }; precursor ${r.linkedDecision ?? "none"}`,
         );
       }
       if (r.added.length > 0) {
@@ -398,7 +401,8 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     flow,
     pending: createPendingStore(sessionStorageOrNull()),
     inspect: () => inspect(),
-    sendEvent,
+    // Cart and checkout page edits are handled like sidebar edits.
+    onCartDiff: (before, after, diff) => miniCart.onChange(before, after, diff, "cart_page"),
     note: (n) => {
       if (n.kind === "click") lastClick = { signal: n.signal, at: n.at };
       if (n.kind === "outcome") record(n.outcome);

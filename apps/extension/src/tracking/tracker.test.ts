@@ -1,9 +1,10 @@
-import type { DecisionEvent, TriggerPageType, Verdict } from "@auxo/shared";
+import type { TriggerPageType, Verdict } from "@auxo/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CartFlow, CartFlowOutcome, LastDecision } from "../flow";
 import type { CartDraft, ClickSignal, PageInspection } from "../messages";
 import { createPendingStore } from "./pending";
+import type { MiniCartDiff } from "./sidesheet";
 import { createTracker, type TrackerNote } from "./tracker";
 
 const NOW = new Date("2026-10-04T20:00:00.000Z");
@@ -46,13 +47,13 @@ function setup(initial: PageInspection) {
   });
   const flow: CartFlow = { check, lastDecision: () => last };
   const pending = createPendingStore(sessionStorage);
-  const sent: DecisionEvent[] = [];
+  const diffs: Array<{ before: CartDraft; after: CartDraft; diff: MiniCartDiff }> = [];
   const notes: TrackerNote[] = [];
   const tracker = createTracker({
     flow,
     pending,
     inspect: () => inspection,
-    sendEvent: (e) => sent.push(e),
+    onCartDiff: async (before, after, diff) => void diffs.push({ before, after, diff }),
     now: () => NOW,
     note: (n) => notes.push(n),
   });
@@ -60,7 +61,7 @@ function setup(initial: PageInspection) {
     tracker,
     check,
     pending,
-    sent,
+    diffs,
     notes,
     setPage: (p: PageInspection) => {
       inspection = p;
@@ -152,7 +153,6 @@ describe("createTracker", () => {
       flow: { check: vi.fn(), lastDecision: () => null },
       pending,
       inspect: () => new Promise<PageInspection>((resolve) => (resolveInspect = resolve)),
-      sendEvent: () => {},
       now: () => NOW,
     });
 
@@ -162,20 +162,16 @@ describe("createTracker", () => {
     resolveInspect({ pageType: "product", draft: null, problems: [] });
   });
 
-  it("credits a cart edit click to the next re-check of the same page", async () => {
+  it("cart edit clicks aren't carried anywhere: the change is credited by the cart handler", async () => {
     const t = setup(cartPage([mug, lamp]));
     await t.tracker.onLoad();
 
-    await t.tracker.onBuyIntent({ intent: "remove_item", source: "known", label: "Delete" });
-    expect(t.pending.takeClick()).toBeNull(); // not carried to another page
+    expect(await t.tracker.onBuyIntent({ intent: "remove_item", source: "known", label: "Delete" })).toBeNull();
+    expect(t.pending.takeClick()).toBeNull();
 
     t.setPage(cartPage([mug]));
     await t.tracker.onPageChange();
-    expect(t.check).toHaveBeenLastCalledWith({
-      signal: { intent: "remove_item", source: "known", label: "Delete" },
-      pageType: "cart",
-      at: NOW.toISOString(),
-    });
+    expect(t.check).toHaveBeenLastCalledWith(null); // the whole-cart re-check is a plain page check
   });
 
   it("does not use up the remembered click on in-page changes", async () => {
@@ -187,7 +183,7 @@ describe("createTracker", () => {
     expect(t.pending.takeClick()?.signal.intent).toBe("buy_now");
   });
 
-  it("reports items removed after a decision, once", async () => {
+  it("passes every cart change on the cart page to the cart handler, once", async () => {
     const t = setup(cartPage([mug, lamp]));
     await t.tracker.onLoad();
 
@@ -195,74 +191,77 @@ describe("createTracker", () => {
     await t.tracker.onPageChange();
     await t.tracker.onPageChange();
 
-    expect(t.sent).toHaveLength(1);
-    expect(t.sent[0]).toMatchObject({
-      decision_id: "2b9ebefe-78c8-561e-9a68-da51842c65a8",
-      action: "removed",
-      occurred_at: NOW.toISOString(),
-      metadata: {
-        removed: [
-          { name: "Mug", price_minor: 999, qty: 2 },
-          { name: "Lamp", price_minor: 3399, qty: 1 },
-        ],
-        before_total_minor: 6396,
-        after_total_minor: 999,
-        currency: "USD",
-        page_type: "cart",
-      },
+    expect(t.diffs).toHaveLength(1);
+    expect(t.diffs[0]!.diff).toEqual({
+      removed: [
+        { name: "Mug", price_minor: 999, qty: 2 },
+        { name: "Lamp", price_minor: 3399, qty: 1 },
+      ],
+      added: [],
     });
+    expect(t.diffs[0]!.before.total_minor).toBe(6396);
   });
 
-  it("reports everything as removed when the cart page empties (last item deleted)", async () => {
+  it("measures changes from the last read, even without any decision", async () => {
+    const t = setup(cartPage([mug]));
+    t.check.mockResolvedValue({ status: "failed_open", pageType: "cart", draft: draftOf([mug]), cartHash: "h", trigger: { intent: "page_view", source: "page", page_type: "cart", occurred_at: NOW.toISOString() }, reason: "network" });
+    await t.tracker.onLoad();
+
+    t.setPage(cartPage([mug, lamp]));
+    await t.tracker.onPageChange();
+    expect(t.diffs[0]!.diff).toEqual({ removed: [], added: [lamp] });
+  });
+
+  it("passes an emptied cart page (last item deleted) as everything removed", async () => {
     const t = setup(cartPage([mug, lamp]));
     await t.tracker.onLoad();
 
     t.setPage({ pageType: "cart", draft: { ...draftOf([]), total_minor: 0 }, problems: [] });
     await t.tracker.onPageChange();
 
-    expect(t.sent).toHaveLength(1);
-    expect(t.sent[0]).toMatchObject({
-      action: "removed",
-      metadata: { removed: [mug, lamp], before_total_minor: 6396, after_total_minor: 0 },
-    });
+    expect(t.diffs[0]!.diff).toEqual({ removed: [mug, lamp], added: [] });
+    expect(t.diffs[0]!.after.items).toEqual([]);
   });
 
-  it("doesn't report removals before any decision, or for additions", async () => {
-    const t = setup(cartPage([mug]));
-    await t.tracker.onPageChange();
-    t.setPage(cartPage([mug, lamp]));
+  it("ignores product pages (their reading is one product, not the cart)", async () => {
+    const t = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
+    await t.tracker.onLoad();
+    t.setPage({ pageType: "product", draft: draftOf([mug]), problems: [] });
     await t.tracker.onPageChange();
 
-    expect(t.sent).toEqual([]);
+    expect(t.diffs).toEqual([]);
   });
 
-  it("remembers the checkout decision on a place-order click", async () => {
+  it("place order: saved right away with the checkout decision, then asked about and re-attached", async () => {
     const t = setup({ pageType: "checkout", draft: draftOf([lamp]), problems: [] });
     await t.tracker.onLoad();
 
-    expect(await t.tracker.onBuyIntent(signal("place_order"))).toBeNull();
+    const outcome = await t.tracker.onBuyIntent(signal("place_order"));
+    expect(t.check).toHaveBeenLastCalledWith({ signal: signal("place_order"), pageType: "checkout", at: NOW.toISOString() });
+    expect(outcome).toMatchObject({ status: "shown" });
     expect(t.pending.takePurchase()).toEqual({
       decisionId: "2b9ebefe-78c8-561e-9a68-da51842c65a8",
       draft: draftOf([lamp]),
       at: NOW.toISOString(),
     });
-    expect(t.notes.some((n) => n.kind === "purchase_pending")).toBe(true);
+    expect(t.notes.filter((n) => n.kind === "purchase_pending")).toHaveLength(2);
   });
 
-  it("ignores a place-order click with no checkout decision", async () => {
+  it("place order with NO earlier checkout decision is still recorded and asked about", async () => {
     const t = setup({ pageType: "checkout", draft: draftOf([lamp]), problems: [] });
+    // The checkout decision never happened (backend down earlier): no onLoad decision.
+    t.check.mockResolvedValueOnce({ status: "failed_open", pageType: "checkout", draft: draftOf([lamp]), cartHash: "h", trigger: { intent: "place_order", source: "known", page_type: "checkout", occurred_at: NOW.toISOString() }, reason: "network" });
 
     await t.tracker.onBuyIntent(signal("place_order"));
-    expect(t.pending.takePurchase()).toBeNull();
+    expect(t.check).toHaveBeenCalledTimes(1);
+    expect(t.pending.takePurchase()).toEqual({ decisionId: null, draft: draftOf([lamp]), at: NOW.toISOString() });
   });
 
-  it("notes clicks, outcomes, and events for the debug panel", async () => {
+  it("notes clicks and outcomes for the debug panel", async () => {
     const t = setup(cartPage([mug, lamp]));
     await t.tracker.onBuyIntent(signal("checkout"));
     await t.tracker.onLoad();
-    t.setPage(cartPage([mug]));
-    await t.tracker.onPageChange();
 
-    expect(t.notes.map((n) => n.kind)).toEqual(["click", "outcome", "event", "outcome"]);
+    expect(t.notes.map((n) => n.kind)).toEqual(["click", "outcome"]);
   });
 });

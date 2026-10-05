@@ -45,6 +45,32 @@ describe("watchForChanges", () => {
     stop();
   });
 
+  it("only counts changes inside the given regions", async () => {
+    const run = vi.fn();
+    document.body.innerHTML += '<div id="ad"></div>';
+    const cart = document.getElementById("cart")!;
+    const stop = watchForChanges(document.body, run, { debounceMs: 500, only: () => [cart] });
+
+    document.getElementById("ad")!.textContent = "new ad";
+    await flush(1_000);
+    expect(run).not.toHaveBeenCalled();
+
+    cart.textContent = "qty 2";
+    await flush(1_000);
+    expect(run).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("watches the whole page when the regions are null", async () => {
+    const run = vi.fn();
+    const stop = watchForChanges(document.body, run, { debounceMs: 500, only: () => null });
+
+    document.getElementById("ours")!.textContent = "anything";
+    await flush(1_000);
+    expect(run).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
   it("stops watching after stop()", async () => {
     const run = vi.fn();
     const stop = watchForChanges(document.body, run, { debounceMs: 500 });

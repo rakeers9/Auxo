@@ -21,7 +21,6 @@ export interface CartFlowDeps {
 export type CartFlowOutcome =
   | { status: "skipped"; pageType: PageType; reason: "not_shopping_page" | "product_without_click" | "added_to_cart_page" }
   | { status: "unreadable"; pageType: PageType; problems: string[] }
-  | { status: "unchanged"; pageType: TriggerPageType; draft: CartDraft; cartHash: string }
   | {
       status: "failed_open";
       pageType: TriggerPageType;
@@ -48,9 +47,8 @@ export interface CartFlow {
 
 // Every cart, checkout, or add-to-cart moment goes to the backend with what
 // prompted it. Product pages only count after an add-to-cart click (Buy Now is
-// decided on the checkout page it leads to). Without a new click, the same
-// cart on the same page isn't asked about twice. Any failure lets the user
-// through.
+// decided on the checkout page it leads to). Every re-check is sent, even an
+// identical cart (tagged same_cart). Any failure lets the user through.
 export function createCartFlow(deps: CartFlowDeps): CartFlow {
   const now = deps.now ?? (() => new Date());
   let lastHash: string | null = null;
@@ -77,7 +75,9 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
       if (draft.items.length === 0) return { status: "unreadable", pageType, problems: ["the cart is empty"] };
 
       const cartHash = await deps.hash(draft);
-      if (!click && cartHash === lastHash) return { status: "unchanged", pageType, draft, cartHash };
+      // The same cart again (e.g. the cart area re-rendered) is still sent:
+      // the backend decides what a repeat means. It's tagged so it can tell.
+      const sameCart = !click && cartHash === lastHash;
       lastHash = cartHash;
 
       const trigger: Trigger = click
@@ -88,7 +88,13 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
             occurred_at: click.at,
             ...(click.signal.label ? { label: click.signal.label } : {}),
           }
-        : { intent: "page_view", source: "page", page_type: pageType, occurred_at: now().toISOString() };
+        : {
+            intent: "page_view",
+            source: "page",
+            page_type: pageType,
+            occurred_at: now().toISOString(),
+            ...(sameCart ? { same_cart: true } : {}),
+          };
 
       const result = await withTimeout(
         deps.requestVerdict({ ...draft, cart_hash: cartHash }, trigger),

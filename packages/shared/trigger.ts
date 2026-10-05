@@ -38,6 +38,9 @@ export const TriggerSchema = z
     occurred_at: z.string().datetime({ offset: true }),
     // The clicked control's visible label, trimmed, for debugging guesses.
     label: z.string().trim().max(200).optional(),
+    // The page re-checked a cart identical to the one it last sent (e.g. the
+    // cart area re-rendered). Sent anyway: the backend decides what it means.
+    same_cart: z.boolean().optional(),
   })
   .strict();
 

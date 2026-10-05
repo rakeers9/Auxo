@@ -15,10 +15,11 @@ export interface PendingClick {
 }
 
 // Saved on a "Place your order" click, so the confirmation page can report
-// what was bought and which decision it followed. The next place-order click
+// what was bought and which decision it followed (the place-order decision,
+// else the checkout decision, else null). The next place-order click
 // replaces it.
 export interface PendingPurchase {
-  decisionId: string;
+  decisionId: string | null;
   draft: CartDraft;
   at: string;
 }
@@ -85,7 +86,7 @@ function isPendingPurchase(value: unknown): value is PendingPurchase {
   return (
     isObject(value) &&
     typeof value.at === "string" &&
-    typeof value.decisionId === "string" &&
+    (typeof value.decisionId === "string" || value.decisionId === null) &&
     isObject(value.draft) &&
     Array.isArray(value.draft.items)
   );
