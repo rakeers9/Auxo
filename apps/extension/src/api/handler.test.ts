@@ -8,6 +8,7 @@ import {
   isAckMessage,
   isClaimMessage,
   isDecideMessage,
+  isDecisionForMessage,
   isEventMessage,
   triggerOf,
 } from "./handler";
@@ -156,5 +157,16 @@ describe("hand-off messages", () => {
     expect(triggerOf({ trigger })).toEqual(trigger);
     expect(triggerOf({ trigger: { intent: "nope" } })).toBeUndefined();
     expect(triggerOf({})).toBeUndefined();
+  });
+});
+
+describe("isDecisionForMessage", () => {
+  it("accepts only well-formed item lists", () => {
+    expect(isDecisionForMessage({ type: "auxo:decision-for", items: [{ name: "Mug", price_minor: 999 }] })).toBe(true);
+    expect(isDecisionForMessage({ type: "auxo:decision-for", items: [] })).toBe(true);
+    expect(isDecisionForMessage({ type: "auxo:decision-for", items: [{ name: "Mug", price_minor: 9.99 }] })).toBe(false);
+    expect(isDecisionForMessage({ type: "auxo:decision-for", items: [{ name: 1, price_minor: 999 }] })).toBe(false);
+    expect(isDecisionForMessage({ type: "auxo:decision-for" })).toBe(false);
+    expect(isDecisionForMessage(null)).toBe(false);
   });
 });

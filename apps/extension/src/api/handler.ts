@@ -65,3 +65,21 @@ export function triggerOf(message: { trigger?: unknown }): Trigger | undefined {
   const parsed = message.trigger === undefined ? undefined : TriggerSchema.safeParse(message.trigger);
   return parsed?.success ? parsed.data : undefined;
 }
+
+export function isDecisionForMessage(
+  message: unknown,
+): message is { type: "auxo:decision-for"; items: Array<{ name: string; price_minor: number }> } {
+  if (typeof message !== "object" || message === null) return false;
+  const m = message as { type?: unknown; items?: unknown };
+  return (
+    m.type === "auxo:decision-for" &&
+    Array.isArray(m.items) &&
+    m.items.every(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as { name?: unknown }).name === "string" &&
+        Number.isSafeInteger((item as { price_minor?: unknown }).price_minor),
+    )
+  );
+}

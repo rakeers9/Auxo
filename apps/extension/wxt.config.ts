@@ -10,5 +10,7 @@ export default defineConfig({
     name: "Auxo",
     description: "Adds a moment of friction before impulse purchases.",
     host_permissions: [`${new URL(apiBaseUrl).origin}/*`],
+    // storage.session: the worker's memory of recent decisions (no install warning).
+    permissions: ["storage"],
   },
 });

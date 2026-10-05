@@ -73,3 +73,14 @@ export interface ClaimMessage {
 export interface ClaimResult {
   verdict: Verdict | null;
 }
+
+// Content script -> worker: which recent decision covered these items? Used
+// to link a removal (e.g. from the cart sidebar) to the decision about it.
+export interface DecisionForMessage {
+  type: "auxo:decision-for";
+  items: Array<{ name: string; price_minor: number }>;
+}
+
+export interface DecisionForResult {
+  decisionId: string | null;
+}
