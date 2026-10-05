@@ -7,8 +7,7 @@ import {
 } from "wxt/utils/content-script-ui/shadow-root";
 
 import { buildExitEvent } from "../src/api/events";
-import { extractAmazonCart, hashCart, isAmazonCartPage } from "../src/cart";
-import { inspectPage } from "../src/debug/inspect";
+import { hashCart, inspectAmazonPage } from "../src/cart";
 import { createDebugPanel, type BackendStatus, type DebugPanel } from "../src/debug/panel";
 import { createCartFlow } from "../src/flow";
 import type { DecideMessage, DecideResult, EventMessage, EventResult, ExitAction } from "../src/messages";
@@ -82,7 +81,7 @@ export default defineContentScript({
       const url = new URL(location.href);
       debugUi.mounted.update({
         url: url.href,
-        inspection: inspectPage(document, url),
+        inspection: inspectAmazonPage(document, url),
         cartHash,
         backend,
         checkedAt: new Date(),
@@ -91,8 +90,9 @@ export default defineContentScript({
     };
 
     const run = createCartFlow({
-      isCartPage: () => isAmazonCartPage(new URL(location.href), document),
-      extract: () => extractAmazonCart(document, new URL(location.href)),
+      // Cart page and every checkout step (Buy Now skips the cart).
+      isCartPage: () => inspectAmazonPage(document, new URL(location.href)).pageType !== "other",
+      extract: () => inspectAmazonPage(document, new URL(location.href)).draft,
       hash: hashCart,
       requestVerdict: (cart) =>
         browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart }),

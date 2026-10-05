@@ -63,6 +63,7 @@ describe("createDebugPanel", () => {
     const text = root.textContent ?? "";
 
     expect(text).toContain("Could not read the cart");
+    expect(text).not.toContain("Could not read the checkout");
     expect(text).toContain("items sum $45.00 but subtotal says $50.00");
     expect(text).toContain("not asked");
   });

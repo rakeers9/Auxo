@@ -117,8 +117,8 @@ function renderBody(doc: Document, s: DebugSnapshot): Node[] {
         ["cart_hash", s.cartHash ?? "…"],
       ]),
     );
-  } else if (pageType !== "other" || problems.length > 0) {
-    nodes.push(heading(doc, "Could not read the cart"));
+  } else if (pageType !== "other") {
+    nodes.push(heading(doc, `Could not read the ${pageType}`));
   }
 
   if (problems.length > 0) {
