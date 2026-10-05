@@ -1,8 +1,9 @@
-import type { Cart, Verdict } from "@auxo/shared";
+import type { Cart, Trigger, Verdict } from "@auxo/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCartFlow, type CartFlowDeps } from "./flow";
-import type { CartDraft, DecideResult } from "./messages";
+import type { CartDraft, DecideResult, PageInspection } from "./messages";
+import type { PendingClick } from "./tracking/pending";
 
 const draft: CartDraft = {
   merchant: "amazon.com",
@@ -12,6 +13,7 @@ const draft: CartDraft = {
   url: "https://www.amazon.com/gp/cart/view.html",
 };
 const HASH = "c".repeat(64);
+const NOW = new Date("2026-10-04T20:00:00.000Z");
 const verdict: Verdict = {
   decision_id: "2b9ebefe-78c8-561e-9a68-da51842c65a8",
   lane: "L2",
@@ -20,14 +22,32 @@ const verdict: Verdict = {
   cooldown_seconds: 60,
 };
 
-function deps(overrides: Partial<CartFlowDeps> = {}): CartFlowDeps {
+const page = (pageType: PageInspection["pageType"], d: CartDraft | null = draft): PageInspection => ({
+  pageType,
+  draft: d,
+  problems: d ? [] : ["could not read"],
+});
+
+const click = (intent: PendingClick["signal"]["intent"], source: "known" | "guess" = "known"): PendingClick => ({
+  signal: { intent, source, label: "Button" },
+  pageType: "product",
+  at: "2026-10-04T19:59:59.000Z",
+});
+
+function deps(overrides: Partial<CartFlowDeps> = {}) {
+  const requestVerdict = vi.fn<(cart: Cart, trigger: Trigger) => Promise<DecideResult>>().mockResolvedValue({ ok: true, verdict });
+  const show = vi.fn<(verdict: Verdict) => void>();
   return {
-    isCartPage: () => true,
-    extract: () => draft,
-    hash: async () => HASH,
-    requestVerdict: vi.fn<(cart: Cart) => Promise<DecideResult>>().mockResolvedValue({ ok: true, verdict }),
-    show: vi.fn<(verdict: Verdict) => void>(),
-    ...overrides,
+    requestVerdict,
+    show,
+    deps: {
+      inspect: () => page("cart"),
+      hash: async () => HASH,
+      requestVerdict,
+      show,
+      now: () => NOW,
+      ...overrides,
+    } satisfies CartFlowDeps,
   };
 }
 
@@ -36,77 +56,125 @@ afterEach(() => {
 });
 
 describe("createCartFlow", () => {
-  it("sends the hashed cart and shows the verdict", async () => {
+  it("asks about a cart page with a page_view trigger and shows the verdict", async () => {
     const d = deps();
+    const outcome = await createCartFlow(d.deps).check();
 
-    expect(await createCartFlow(d)()).toEqual({ status: "shown", verdict, cartHash: HASH });
-    expect(d.requestVerdict).toHaveBeenCalledWith({ ...draft, cart_hash: HASH });
+    const trigger = { intent: "page_view", source: "page", page_type: "cart", occurred_at: NOW.toISOString() };
+    expect(outcome).toEqual({ status: "shown", pageType: "cart", draft, cartHash: HASH, trigger, verdict });
+    expect(d.requestVerdict).toHaveBeenCalledWith({ ...draft, cart_hash: HASH }, trigger);
     expect(d.show).toHaveBeenCalledWith(verdict);
   });
 
-  it("does nothing off the cart page", async () => {
-    const d = deps({ isCartPage: () => false });
+  it("sends the click as the trigger when there is one", async () => {
+    const d = deps({ inspect: () => page("checkout") });
+    await createCartFlow(d.deps).check(click("buy_now"));
 
-    expect(await createCartFlow(d)()).toEqual({ status: "not_cart" });
+    expect(d.requestVerdict.mock.calls[0]?.[1]).toEqual({
+      intent: "buy_now",
+      source: "known",
+      page_type: "checkout",
+      occurred_at: "2026-10-04T19:59:59.000Z",
+      label: "Button",
+    });
+  });
+
+  it("skips pages that aren't for shopping", async () => {
+    const d = deps({ inspect: () => page("other", null) });
+
+    expect(await createCartFlow(d.deps).check(click("add_to_cart"))).toEqual({
+      status: "skipped",
+      pageType: "other",
+      reason: "not_shopping_page",
+    });
     expect(d.requestVerdict).not.toHaveBeenCalled();
   });
 
-  it("does nothing when the cart cannot be read", async () => {
-    const d = deps({ extract: () => null });
+  it("only asks on a product page after an add-to-cart click", async () => {
+    const d = deps({ inspect: () => page("product") });
+    const flow = createCartFlow(d.deps);
 
-    expect(await createCartFlow(d)()).toEqual({ status: "unreadable" });
-    expect(d.requestVerdict).not.toHaveBeenCalled();
-  });
-
-  it("asks only once for the same cart", async () => {
-    const d = deps();
-    const run = createCartFlow(d);
-
-    await run();
-    expect(await run()).toEqual({ status: "unchanged", cartHash: HASH });
+    expect(await flow.check()).toMatchObject({ status: "skipped", reason: "product_without_click" });
+    expect(await flow.check(click("buy_now"))).toMatchObject({ status: "skipped", reason: "product_without_click" });
+    expect(await flow.check(click("add_to_cart"))).toMatchObject({ status: "shown", pageType: "product" });
     expect(d.requestVerdict).toHaveBeenCalledTimes(1);
-    expect(d.show).toHaveBeenCalledTimes(1);
   });
 
-  it("asks again when the cart changes", async () => {
-    let hash = HASH;
-    const d = deps({ hash: async () => hash });
-    const run = createCartFlow(d);
+  it("reports why an unreadable page wasn't asked about", async () => {
+    const d = deps({ inspect: () => page("cart", null) });
 
-    await run();
-    hash = "d".repeat(64);
-    await run();
+    expect(await createCartFlow(d.deps).check()).toEqual({
+      status: "unreadable",
+      pageType: "cart",
+      problems: ["could not read"],
+    });
+    expect(d.requestVerdict).not.toHaveBeenCalled();
+  });
+
+  it("doesn't re-ask about the same cart without a new click", async () => {
+    const d = deps();
+    const flow = createCartFlow(d.deps);
+
+    await flow.check();
+    expect(await flow.check()).toEqual({ status: "unchanged", pageType: "cart", draft, cartHash: HASH });
+    expect(d.requestVerdict).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-asks about the same cart after a new click", async () => {
+    const d = deps();
+    const flow = createCartFlow(d.deps);
+
+    await flow.check();
+    await flow.check(click("checkout"));
     expect(d.requestVerdict).toHaveBeenCalledTimes(2);
   });
 
-  it("fails open when the API fails", async () => {
-    const d = deps({
-      requestVerdict: vi.fn<(cart: Cart) => Promise<DecideResult>>().mockResolvedValue({ ok: false, reason: "http" }),
-    });
+  it("re-asks when the cart changes", async () => {
+    let hash = HASH;
+    const d = deps({ hash: async () => hash });
+    const flow = createCartFlow(d.deps);
 
-    expect(await createCartFlow(d)()).toEqual({ status: "failed_open", reason: "http", cartHash: HASH });
+    await flow.check();
+    hash = "d".repeat(64);
+    await flow.check();
+    expect(d.requestVerdict).toHaveBeenCalledTimes(2);
+  });
+
+  it("remembers the last decision", async () => {
+    const d = deps();
+    const flow = createCartFlow(d.deps);
+
+    expect(flow.lastDecision()).toBeNull();
+    await flow.check();
+    expect(flow.lastDecision()).toEqual({ decisionId: verdict.decision_id, draft, cartHash: HASH, pageType: "cart" });
+  });
+
+  it("fails open when the API fails, and keeps no decision", async () => {
+    const d = deps();
+    d.requestVerdict.mockResolvedValue({ ok: false, reason: "http" });
+    const flow = createCartFlow(d.deps);
+
+    expect(await flow.check()).toMatchObject({ status: "failed_open", reason: "http" });
     expect(d.show).not.toHaveBeenCalled();
+    expect(flow.lastDecision()).toBeNull();
   });
 
   it("fails open when the worker throws", async () => {
-    const d = deps({
-      requestVerdict: vi.fn<(cart: Cart) => Promise<DecideResult>>().mockRejectedValue(new Error("worker gone")),
-    });
+    const d = deps();
+    d.requestVerdict.mockRejectedValue(new Error("worker gone"));
 
-    expect(await createCartFlow(d)()).toEqual({ status: "failed_open", reason: "network", cartHash: HASH });
+    expect(await createCartFlow(d.deps).check()).toMatchObject({ status: "failed_open", reason: "network" });
   });
 
   it("fails open when the worker never answers", async () => {
     vi.useFakeTimers();
-    const d = deps({
-      requestVerdict: vi.fn<(cart: Cart) => Promise<DecideResult>>(() => new Promise(() => {})),
-      timeoutMs: 3_000,
-    });
+    const d = deps({ timeoutMs: 3_000 });
+    d.requestVerdict.mockImplementation(() => new Promise(() => {}));
 
-    const pending = createCartFlow(d)();
+    const pending = createCartFlow(d.deps).check();
     await vi.advanceTimersByTimeAsync(3_000);
 
-    expect(await pending).toEqual({ status: "failed_open", reason: "timeout", cartHash: HASH });
+    expect(await pending).toMatchObject({ status: "failed_open", reason: "timeout" });
     expect(d.show).not.toHaveBeenCalled();
   });
 });

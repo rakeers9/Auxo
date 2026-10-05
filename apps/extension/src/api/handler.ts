@@ -1,24 +1,26 @@
-import { CartSchema, DecisionEventSchema, type Cart, type DecisionEvent } from "@auxo/shared";
+import { CartSchema, DecisionEventSchema, TriggerSchema, type Cart, type DecisionEvent, type Trigger } from "@auxo/shared";
 
 import type { DecideResult, EventResult } from "../messages";
 
-export function isDecideMessage(message: unknown): message is { type: "auxo:decide"; cart: unknown } {
+export function isDecideMessage(message: unknown): message is { type: "auxo:decide"; cart: unknown; trigger?: unknown } {
   return typeof message === "object" && message !== null && (message as { type?: unknown }).type === "auxo:decide";
 }
 
 // Runs in the background worker. Re-validates the cart (messages cross a
 // process boundary) and never throws, so the content script can fail open.
 export async function handleDecideMessage(
-  message: { type: "auxo:decide"; cart: unknown },
-  decide: (cart: Cart) => Promise<DecideResult>,
+  message: { type: "auxo:decide"; cart: unknown; trigger?: unknown },
+  decide: (cart: Cart, trigger?: Trigger) => Promise<DecideResult>,
 ): Promise<DecideResult> {
   const parsed = CartSchema.safeParse(message.cart);
   if (!parsed.success) {
     return { ok: false, reason: "invalid_cart" };
   }
+  // A malformed trigger is dropped rather than failing the decision.
+  const trigger = message.trigger === undefined ? undefined : TriggerSchema.safeParse(message.trigger);
 
   try {
-    return await decide(parsed.data);
+    return await (trigger?.success ? decide(parsed.data, trigger.data) : decide(parsed.data));
   } catch {
     return { ok: false, reason: "network" };
   }

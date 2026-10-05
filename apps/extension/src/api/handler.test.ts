@@ -1,4 +1,4 @@
-import type { Cart, DecisionEvent, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, Trigger, Verdict } from "@auxo/shared";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DecideResult, EventResult } from "../messages";
@@ -31,6 +31,27 @@ describe("isDecideMessage", () => {
 });
 
 describe("handleDecideMessage", () => {
+  const trigger = {
+    intent: "checkout",
+    source: "known",
+    page_type: "checkout",
+    occurred_at: "2026-10-04T20:00:00.000Z",
+  } as const;
+
+  it("passes a valid trigger along with the cart", async () => {
+    const decide = vi.fn<(cart: Cart, trigger?: Trigger) => Promise<DecideResult>>().mockResolvedValue({ ok: true, verdict });
+
+    await handleDecideMessage({ type: "auxo:decide", cart, trigger }, decide);
+    expect(decide).toHaveBeenCalledWith(cart, trigger);
+  });
+
+  it("drops a malformed trigger but still decides", async () => {
+    const decide = vi.fn<(cart: Cart, trigger?: Trigger) => Promise<DecideResult>>().mockResolvedValue({ ok: true, verdict });
+
+    await handleDecideMessage({ type: "auxo:decide", cart, trigger: { intent: "nope" } }, decide);
+    expect(decide).toHaveBeenCalledWith(cart);
+  });
+
   it("passes a valid cart to decide and returns its result", async () => {
     const decide = vi.fn<(cart: Cart) => Promise<DecideResult>>().mockResolvedValue({ ok: true, verdict });
 

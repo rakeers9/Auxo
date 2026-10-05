@@ -116,6 +116,34 @@ describe("createDebugPanel", () => {
   });
 });
 
+describe("click tracking lines", () => {
+  it("shows the trigger, last click, events, and a pending purchase", () => {
+    const { root, panel } = mount();
+    panel.update(
+      snapshot({
+        trigger: { intent: "add_to_cart", source: "known", page_type: "product", occurred_at: "2026-10-04T20:00:00.000Z", label: "Add to Cart" },
+        lastClick: { signal: { intent: "add_to_cart", source: "known", label: "Add to Cart" }, at: new Date("2026-10-04T20:00:00Z") },
+        events: [{ action: "removed", decisionId: "2b9ebefe-78c8-561e-9a68-da51842c65a8", at: new Date("2026-10-04T20:01:00Z") }],
+        pendingPurchase: "2b9ebefe-78c8-561e-9a68-da51842c65a8",
+      }),
+    );
+    const text = root.textContent ?? "";
+
+    expect(text).toContain('add_to_cart (known: "Add to Cart")');
+    expect(text).toContain("Events sent");
+    expect(text).toContain("removed");
+    expect(text).toContain("pending confirmation");
+  });
+
+  it("shows 'none' when nothing was clicked", () => {
+    const { root, panel } = mount();
+    panel.update(snapshot());
+
+    expect(root.textContent).toContain("last click");
+    expect(root.textContent).toContain("none");
+  });
+});
+
 describe("money", () => {
   it("formats minor units for display", () => {
     expect(money(0, "USD")).toBe("$0.00");

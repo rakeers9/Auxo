@@ -1,9 +1,10 @@
-import type { Cart, DecisionEvent, TriggerIntent, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, Trigger, TriggerIntent, Verdict } from "@auxo/shared";
 
 // Content script -> background worker: ask the API for a verdict on this cart.
 export interface DecideMessage {
   type: "auxo:decide";
   cart: Cart;
+  trigger?: Trigger;
 }
 
 // Background worker -> content script. Any failure is reported, never thrown,

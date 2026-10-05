@@ -1,6 +1,7 @@
 import type { Lane } from "@auxo/shared";
+import type { Trigger, UserAction } from "@auxo/shared";
 
-import type { DecideFailureReason, PageInspection } from "../messages";
+import type { ClickSignal, DecideFailureReason, PageInspection } from "../messages";
 
 export type BackendStatus =
   | { status: "not_asked" }
@@ -15,6 +16,12 @@ export interface DebugSnapshot {
   backend: BackendStatus;
   checkedAt: Date;
   checks: number;
+  // The trigger sent with the last decision request, if any.
+  trigger?: Trigger | null;
+  lastClick?: { signal: ClickSignal; at: Date } | null;
+  // Most recent first.
+  events?: Array<{ action: UserAction; decisionId: string; at: Date }>;
+  pendingPurchase?: string | null;
 }
 
 export interface DebugPanel {
@@ -96,6 +103,9 @@ function renderBody(doc: Document, s: DebugSnapshot): Node[] {
       ["path", url.pathname],
       ["checked", `${s.checkedAt.toLocaleTimeString()} (#${s.checks})`],
       ["backend", backendText(s.backend)],
+      ["trigger", s.trigger ? triggerText(s.trigger) : "none"],
+      ["last click", s.lastClick ? clickText(s.lastClick.signal, s.lastClick.at) : "none"],
+      ...(s.pendingPurchase ? ([["purchase", `pending confirmation (decision ${s.pendingPurchase})`]] as Array<[string, string]>) : []),
     ]),
   );
 
@@ -132,6 +142,16 @@ function renderBody(doc: Document, s: DebugSnapshot): Node[] {
     nodes.push(ul);
   }
 
+  if (s.events && s.events.length > 0) {
+    nodes.push(heading(doc, "Events sent"));
+    nodes.push(
+      list(
+        doc,
+        s.events.slice(0, 5).map((e): [string, string] => [e.action, `${e.at.toLocaleTimeString()} ${e.decisionId}`]),
+      ),
+    );
+  }
+
   if (details && Object.keys(details).length > 0) {
     nodes.push(heading(doc, "Details"));
     nodes.push(list(doc, Object.entries(details).map(([k, v]) => [k, v])));
@@ -151,6 +171,14 @@ function backendText(b: BackendStatus): string {
     case "failed":
       return `failed open: ${b.reason}`;
   }
+}
+
+function triggerText(t: Trigger): string {
+  return `${t.intent} (${t.source}${t.label ? `: "${t.label}"` : ""})`;
+}
+
+function clickText(signal: ClickSignal, at: Date): string {
+  return `${signal.intent} (${signal.source}${signal.label ? `: "${signal.label}"` : ""}) at ${at.toLocaleTimeString()}`;
 }
 
 // Display only. Money stays in integer minor units everywhere else.

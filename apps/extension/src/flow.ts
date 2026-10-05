@@ -1,51 +1,97 @@
-import type { Cart, Verdict } from "@auxo/shared";
+import type { Cart, Trigger, TriggerPageType, Verdict } from "@auxo/shared";
 
-import type { CartDraft, DecideFailureReason, DecideResult } from "./messages";
+import type { CartDraft, DecideFailureReason, DecideResult, PageInspection } from "./messages";
+import type { PendingClick } from "./tracking/pending";
 
 // The worker's own API timeout is 2.5s; this guards against the worker never
 // answering at all (e.g. it was restarted mid-request).
 export const CONTENT_TIMEOUT_MS = 3_000;
 
 export interface CartFlowDeps {
-  isCartPage(): boolean;
-  extract(): CartDraft | null;
+  inspect(): PageInspection;
   hash(draft: CartDraft): Promise<string>;
-  requestVerdict(cart: Cart): Promise<DecideResult>;
+  requestVerdict(cart: Cart, trigger: Trigger): Promise<DecideResult>;
   show(verdict: Verdict): void;
+  now?: () => Date;
   timeoutMs?: number;
 }
 
 export type CartFlowOutcome =
-  | { status: "not_cart" }
-  | { status: "unreadable" }
-  | { status: "unchanged"; cartHash: string }
-  | { status: "failed_open"; reason: DecideFailureReason; cartHash: string }
-  | { status: "shown"; verdict: Verdict; cartHash: string };
+  | { status: "skipped"; pageType: TriggerPageType; reason: "not_shopping_page" | "product_without_click" }
+  | { status: "unreadable"; pageType: TriggerPageType; problems: string[] }
+  | { status: "unchanged"; pageType: TriggerPageType; draft: CartDraft; cartHash: string }
+  | {
+      status: "failed_open";
+      pageType: TriggerPageType;
+      draft: CartDraft;
+      cartHash: string;
+      trigger: Trigger;
+      reason: DecideFailureReason;
+    }
+  | { status: "shown"; pageType: TriggerPageType; draft: CartDraft; cartHash: string; trigger: Trigger; verdict: Verdict };
 
-// Detect -> extract -> hash -> ask -> show. Any failure lets the user through.
-// Create one per page; it skips carts it has already handled.
-export function createCartFlow(deps: CartFlowDeps): () => Promise<CartFlowOutcome> {
+export interface LastDecision {
+  decisionId: string;
+  draft: CartDraft;
+  cartHash: string;
+  pageType: TriggerPageType;
+}
+
+export interface CartFlow {
+  // Read the page and, if it's a buy moment, ask for a decision. `click` is a
+  // buy-intent click from this page or the one before it.
+  check(click?: PendingClick | null): Promise<CartFlowOutcome>;
+  lastDecision(): LastDecision | null;
+}
+
+// Every cart, checkout, or add-to-cart moment goes to the backend with what
+// prompted it. Product pages only count after an add-to-cart click (Buy Now is
+// decided on the checkout page it leads to). Without a new click, the same
+// cart on the same page isn't asked about twice. Any failure lets the user
+// through.
+export function createCartFlow(deps: CartFlowDeps): CartFlow {
+  const now = deps.now ?? (() => new Date());
   let lastHash: string | null = null;
+  let last: LastDecision | null = null;
 
-  return async () => {
-    if (!deps.isCartPage()) return { status: "not_cart" };
+  return {
+    lastDecision: () => last,
+    async check(click) {
+      const inspection = deps.inspect();
+      const pageType = inspection.pageType;
 
-    const draft = deps.extract();
-    if (!draft) return { status: "unreadable" };
+      if (pageType === "other") return { status: "skipped", pageType, reason: "not_shopping_page" };
+      if (pageType === "product" && click?.signal.intent !== "add_to_cart") {
+        return { status: "skipped", pageType, reason: "product_without_click" };
+      }
 
-    const cartHash = await deps.hash(draft);
-    if (cartHash === lastHash) return { status: "unchanged", cartHash };
-    lastHash = cartHash;
+      const draft = inspection.draft;
+      if (!draft) return { status: "unreadable", pageType, problems: inspection.problems };
 
-    const result = await withTimeout(
-      deps.requestVerdict({ ...draft, cart_hash: cartHash }),
-      deps.timeoutMs ?? CONTENT_TIMEOUT_MS,
-    );
+      const cartHash = await deps.hash(draft);
+      if (!click && cartHash === lastHash) return { status: "unchanged", pageType, draft, cartHash };
+      lastHash = cartHash;
 
-    if (!result.ok) return { status: "failed_open", reason: result.reason, cartHash };
+      const trigger: Trigger = click
+        ? {
+            intent: click.signal.intent,
+            source: click.signal.source,
+            page_type: pageType,
+            occurred_at: click.at,
+            ...(click.signal.label ? { label: click.signal.label } : {}),
+          }
+        : { intent: "page_view", source: "page", page_type: pageType, occurred_at: now().toISOString() };
 
-    deps.show(result.verdict);
-    return { status: "shown", verdict: result.verdict, cartHash };
+      const result = await withTimeout(
+        deps.requestVerdict({ ...draft, cart_hash: cartHash }, trigger),
+        deps.timeoutMs ?? CONTENT_TIMEOUT_MS,
+      );
+      if (!result.ok) return { status: "failed_open", pageType, draft, cartHash, trigger, reason: result.reason };
+
+      last = { decisionId: result.verdict.decision_id, draft, cartHash, pageType };
+      deps.show(result.verdict);
+      return { status: "shown", pageType, draft, cartHash, trigger, verdict: result.verdict };
+    },
   };
 }
 

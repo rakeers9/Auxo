@@ -1,4 +1,4 @@
-import type { Verdict } from "@auxo/shared";
+import type { DecisionEvent, Trigger, UserAction, Verdict } from "@auxo/shared";
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import {
@@ -8,10 +8,14 @@ import {
 
 import { buildExitEvent } from "../src/api/events";
 import { hashCart, inspectAmazonPage } from "../src/cart";
+import { classifyClick, classifySubmit } from "../src/clicks";
 import { createDebugPanel, type BackendStatus, type DebugPanel } from "../src/debug/panel";
-import { createCartFlow } from "../src/flow";
-import type { DecideMessage, DecideResult, EventMessage, EventResult, ExitAction } from "../src/messages";
+import { createCartFlow, type CartFlowOutcome } from "../src/flow";
+import type { ClickSignal, DecideMessage, DecideResult, EventMessage, EventResult, ExitAction } from "../src/messages";
 import { renderOverlay, type OverlayHandle } from "../src/overlay";
+import { listenForBuyIntents } from "../src/tracking/listener";
+import { createPendingStore } from "../src/tracking/pending";
+import { createTracker } from "../src/tracking/tracker";
 import { watchForChanges } from "../src/watch";
 
 const RECHECK_DEBOUNCE_MS = 500;
@@ -20,30 +24,66 @@ const RECHECK_DEBOUNCE_MS = 500;
 // debug panel instead of the overlay, to check what the extension reads.
 const DEBUG = import.meta.env.MODE === "development";
 
+function sessionStorageOrNull(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 export default defineContentScript({
   matches: ["https://www.amazon.com/*"],
   async main(ctx) {
     let ui: ShadowRootContentScriptUi<OverlayHandle | null> | null = null;
     let debugUi: ShadowRootContentScriptUi<DebugPanel> | null = null;
+
+    // What the debug panel shows, kept between checks.
     let checks = 0;
-    let lastBackend: BackendStatus = { status: "not_asked" };
+    let backend: BackendStatus = { status: "not_asked" };
+    let cartHash: string | null = null;
+    let trigger: Trigger | null = null;
+    let lastClick: { signal: ClickSignal; at: Date } | null = null;
+    let pendingPurchase: string | null = null;
+    const events: Array<{ action: UserAction; decisionId: string; at: Date }> = [];
+
+    const refreshDebug = () => {
+      if (!debugUi?.mounted) return;
+      const url = new URL(location.href);
+      debugUi.mounted.update({
+        url: url.href,
+        inspection: inspectAmazonPage(document, url),
+        cartHash,
+        backend,
+        checkedAt: new Date(),
+        checks,
+        trigger,
+        lastClick,
+        events,
+        pendingPurchase,
+      });
+    };
 
     const removeOverlay = () => {
       ui?.remove(); // onRemove calls destroy(), which clears timers and listeners
       ui = null;
     };
 
-    // Every exit is logged (design invariant: every override is recorded).
-    // The event is built once, so a retry would reuse its event_id.
-    const onExit = (verdict: Verdict, action: ExitAction) => {
-      removeOverlay();
-      const event = buildExitEvent(verdict.decision_id, action);
+    const sendEvent = (event: DecisionEvent) => {
+      events.unshift({ action: event.action, decisionId: event.decision_id, at: new Date(event.occurred_at) });
+      refreshDebug();
       void browser.runtime
         .sendMessage<EventMessage, EventResult>({ type: "auxo:event", event })
         .then((result) => {
-          if (!result.ok) console.info("[Auxo] exit not recorded:", result.reason);
+          if (!result.ok) console.info(`[Auxo] ${event.action} event not recorded:`, result.reason);
         })
-        .catch(() => console.info("[Auxo] exit not recorded: worker unavailable"));
+        .catch(() => console.info(`[Auxo] ${event.action} event not recorded: worker unavailable`));
+    };
+
+    // Every exit is logged (design invariant: every override is recorded).
+    const onExit = (verdict: Verdict, action: ExitAction) => {
+      removeOverlay();
+      sendEvent(buildExitEvent(verdict.decision_id, action));
     };
 
     const show = async (verdict: Verdict) => {
@@ -75,66 +115,78 @@ export default defineContentScript({
       debugUi.mount();
     }
 
-    const debug = (backend: BackendStatus, cartHash: string | null = null) => {
-      if (backend.status !== "pending") lastBackend = backend;
-      if (!debugUi?.mounted) return;
-      const url = new URL(location.href);
-      debugUi.mounted.update({
-        url: url.href,
-        inspection: inspectAmazonPage(document, url),
-        cartHash,
-        backend,
-        checkedAt: new Date(),
-        checks,
-      });
+    const record = (outcome: CartFlowOutcome) => {
+      // A product page re-render after an add-to-cart answer shouldn't wipe it.
+      if (outcome.status === "skipped" && outcome.reason === "product_without_click") return;
+      switch (outcome.status) {
+        case "skipped":
+        case "unreadable":
+          backend = { status: "not_asked" };
+          cartHash = null;
+          break;
+        case "unchanged":
+          cartHash = outcome.cartHash; // keep showing the last answer
+          break;
+        case "failed_open":
+          console.info("[Auxo] failed open:", outcome.reason);
+          backend = { status: "failed", reason: outcome.reason };
+          cartHash = outcome.cartHash;
+          trigger = outcome.trigger;
+          break;
+        case "shown":
+          backend = {
+            status: "verdict",
+            lane: outcome.verdict.lane,
+            decisionId: outcome.verdict.decision_id,
+            templateId: outcome.verdict.template_id,
+          };
+          cartHash = outcome.cartHash;
+          trigger = outcome.trigger;
+          break;
+      }
     };
 
-    const run = createCartFlow({
-      // Cart page and every checkout step (Buy Now skips the cart).
-      isCartPage: () => ["cart", "checkout"].includes(inspectAmazonPage(document, new URL(location.href)).pageType),
-      extract: () => inspectAmazonPage(document, new URL(location.href)).draft,
+    const flow = createCartFlow({
+      inspect: () => inspectAmazonPage(document, new URL(location.href)),
       hash: hashCart,
-      requestVerdict: (cart) =>
-        browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart }),
+      requestVerdict: (cart, t) =>
+        browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart, trigger: t }),
       show: (verdict) => void show(verdict),
     });
 
-    const check = () => {
+    const tracker = createTracker({
+      flow,
+      pending: createPendingStore(sessionStorageOrNull()),
+      inspect: () => inspectAmazonPage(document, new URL(location.href)),
+      sendEvent,
+      note: (n) => {
+        if (n.kind === "click") lastClick = { signal: n.signal, at: n.at };
+        if (n.kind === "outcome") record(n.outcome);
+        if (n.kind === "purchase_pending") pendingPurchase = n.decisionId;
+        refreshDebug();
+      },
+    });
+
+    const step = (run: () => Promise<unknown>) => () => {
       if (ctx.isInvalid) return;
       checks += 1;
-      debug({ status: "pending" });
-      void run().then((outcome) => {
-        if (outcome.status === "failed_open") console.info("[Auxo] failed open:", outcome.reason);
-        switch (outcome.status) {
-          case "not_cart":
-          case "unreadable":
-            return debug({ status: "not_asked" });
-          case "unchanged":
-            // Same cart as the last check on this page: keep showing its answer.
-            return debug(lastBackend, outcome.cartHash);
-          case "failed_open":
-            return debug({ status: "failed", reason: outcome.reason }, outcome.cartHash);
-          case "shown":
-            return debug(
-              {
-                status: "verdict",
-                lane: outcome.verdict.lane,
-                decisionId: outcome.verdict.decision_id,
-                templateId: outcome.verdict.template_id,
-              },
-              outcome.cartHash,
-            );
-        }
-      });
+      refreshDebug();
+      void run();
     };
 
-    check();
-    const stop = watchForChanges(document.body, check, {
+    step(() => tracker.onLoad())();
+    const stopWatching = watchForChanges(document.body, step(() => tracker.onPageChange()), {
       debounceMs: RECHECK_DEBOUNCE_MS,
       ignore: () => [ui?.shadowHost, debugUi?.shadowHost],
     });
+    const stopListening = listenForBuyIntents(document, { classifyClick, classifySubmit }, (signal) => {
+      if (ctx.isInvalid) return;
+      void tracker.onBuyIntent(signal);
+    });
+
     ctx.onInvalidated(() => {
-      stop();
+      stopWatching();
+      stopListening();
       removeOverlay();
       debugUi?.remove();
     });

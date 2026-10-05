@@ -63,7 +63,7 @@ pnpm --filter @auxo/extension exec vitest run src/cart
 
 Auxo adds friction before impulse purchases. The pipeline spans both apps:
 
-1. **Extension content script** (`apps/extension`, WXT, Chrome first, Amazon first) detects a cart page, extracts a `Cart`, and hashes it so one cart gets one verdict.
+1. **Extension content script** (`apps/extension`, WXT, Chrome first, Amazon first). Buy-intent clicks (add to cart, buy now, go to cart, checkout, place order; `src/clicks`) decide *when* to ask, and the page readers (`src/cart`, `inspectAmazonPage`) decide *what* to send. Cart and checkout pages are also asked about on load. Every request sends the `Cart` plus a `Trigger` (`packages/shared/trigger.ts`). A click that changes pages is remembered in sessionStorage for the next page (`src/tracking`). Items removed after a decision send a `removed` event, and a place-order click is held for the order confirmation page to send `bought`.
 2. **`POST /v1/decide`** validates the cart and returns a `Verdict` (lane, action, template_id, cooldown_seconds). The real version builds state (budget, rules, history), asks Jev for signals, and runs a deterministic policy engine. **Jev only supplies signals; code makes the final call.**
 3. The extension broadcasts the verdict as an internal `verdict` message. The overlay (shadow DOM) renders the lane. L3/L4 checkout blocking uses `declarativeNetRequest` and is lifted by a `Pass`.
 4. User exits (`left`, `saved`, `overrode`, `bought`) go back as events, and later a "was it worth it?" check-in feeds regret rates into future decisions.

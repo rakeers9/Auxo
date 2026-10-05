@@ -1,4 +1,4 @@
-import { VerdictSchema, type Cart } from "@auxo/shared";
+import { VerdictSchema, type Cart, type Trigger } from "@auxo/shared";
 
 import type { DecideResult } from "../messages";
 
@@ -12,7 +12,7 @@ export interface DecideOptions {
   fetch?: typeof fetch;
 }
 
-export async function decide(cart: Cart, options: DecideOptions): Promise<DecideResult> {
+export async function decide(cart: Cart, options: DecideOptions, trigger?: Trigger): Promise<DecideResult> {
   const fetchFn = options.fetch ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DECIDE_TIMEOUT_MS);
@@ -23,7 +23,7 @@ export async function decide(cart: Cart, options: DecideOptions): Promise<Decide
       response = await fetchFn(new URL("/v1/decide", options.baseUrl), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cart }),
+        body: JSON.stringify(trigger ? { cart, trigger } : { cart }),
         signal: controller.signal,
       });
     } catch {

@@ -44,6 +44,20 @@ describe("decide", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ cart });
   });
 
+  it("sends the trigger with the cart when given", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(verdict));
+    const trigger = {
+      intent: "add_to_cart" as const,
+      source: "known" as const,
+      page_type: "product" as const,
+      occurred_at: "2026-10-04T20:00:00.000Z",
+    };
+
+    await decide(cart, { baseUrl: "http://x", fetch: fetchMock }, trigger);
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ cart, trigger });
+  });
+
   it("fails open with 'http' on a non-2xx status", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({ error: { code: "INVALID_REQUEST", message: "bad" } }, 400),
