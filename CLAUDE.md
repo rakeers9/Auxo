@@ -69,7 +69,7 @@ Auxo adds friction before impulse purchases. The pipeline spans both apps:
 
 Invariants from the design doc: users can always continue (after a cooldown), every override is logged, and any timeout or error **fails open** (about 2 seconds).
 
-`/v1/decide` (`apps/api/src/services/decision-service.ts`) runs the policy engine (`policy-engine.ts`) when the user has rules or budgets, takes the stricter of that and Jev's lane when `TYPESAFE_API_KEY` is set (`jev-provider.ts`), and otherwise falls back to the stub (`stub-decision.ts`). In the stub, the last hex digit of `cart_hash` mod 5 picks L0–L4, and `decision_id` is a UUID derived from the user and hash, so it's deterministic. With no rules and no Jev key, use a 64-hex `cart_hash` ending in `0`–`4` to get each lane in the extension.
+`/v1/decide` (`apps/api/src/services/decision-service.ts`) runs the policy engine (`policy-engine.ts`) when the user has rules or budgets, takes the stricter of that and the decision model's lane when `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` are set (Cloudflare Clef, `decision-model-provider.ts`; replaced Jev/TypeSafe on 2026-10-04, AUX-9), and otherwise falls back to the stub (`stub-decision.ts`). The response also carries an optional `context` (`packages/shared/decision-context.ts`) explaining the decision. `/v1/passes` issues a pass for a decision. Every request is analyzed fresh and gets its own random `decision_id`; past verdicts are never reused (decided 2026-10-04). In the stub, the last hex digit of `cart_hash` mod 5 picks L0–L4. With no rules and no model key, use a 64-hex `cart_hash` ending in `0`–`4` to get each lane in the extension.
 
 ## Contracts (`packages/shared`)
 

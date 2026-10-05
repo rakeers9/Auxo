@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { Cart, Lane, Verdict, VerdictAction } from "@auxo/shared";
 
 const LANES = ["L0", "L1", "L2", "L3", "L4"] as const satisfies readonly Lane[];
@@ -15,24 +13,16 @@ const LANE_POLICY: Record<
   L4: { action: "block", cooldownSeconds: 900, templateId: "l4-block" },
 };
 
-function deterministicUuid(cartHash: string, userId: string): string {
-  const digest = createHash("sha256")
-    .update(`auxo-stub:${userId}:${cartHash}`)
-    .digest("hex");
-  const variant = ((Number.parseInt(digest[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
-  const value = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-${variant}${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
-
-  return value;
-}
-
-export function createStubVerdict(cart: Cart, userId: string): Verdict {
+// The lane comes from the last hex digit of cart_hash, so each lane can be
+// reproduced on purpose while testing.
+export function createStubVerdict(cart: Cart, decisionId: string): Verdict {
   const normalizedHash = cart.cart_hash.replace(/^sha256:/i, "");
   const finalNibble = Number.parseInt(normalizedHash.at(-1) ?? "0", 16);
   const lane = LANES[finalNibble % LANES.length] ?? "L1";
   const policy = LANE_POLICY[lane];
 
   return {
-    decision_id: deterministicUuid(normalizedHash, userId),
+    decision_id: decisionId,
     lane,
     action: policy.action,
     template_id: policy.templateId,

@@ -63,15 +63,30 @@ describe("POST /v1/decide", () => {
     });
   });
 
-  it("returns the same verdict for the same cart hash", async () => {
+  it("analyzes the same cart again on every request", async () => {
     const app = await buildApp();
     openApps.push(app);
     const payload = { cart: cartWithHashSuffix("2") };
 
-    const first = await app.inject({ method: "POST", url: "/v1/decide", payload });
-    const second = await app.inject({ method: "POST", url: "/v1/decide", payload });
+    const first = (await app.inject({ method: "POST", url: "/v1/decide", payload })).json();
+    const second = (await app.inject({ method: "POST", url: "/v1/decide", payload })).json();
 
-    expect(second.json()).toEqual(first.json());
+    expect(second.decision_id).not.toBe(first.decision_id);
+    expect(second.lane).toBe(first.lane);
+
+    for (const decision of [first, second]) {
+      const event = await app.inject({
+        method: "POST",
+        url: "/v1/events",
+        payload: {
+          event_id: randomUUID(),
+          decision_id: decision.decision_id,
+          action: "left",
+          occurred_at: "2026-10-04T16:00:00.000Z",
+        },
+      });
+      expect(event.statusCode).toBe(201);
+    }
   });
 
   it("rejects an invalid cart", async () => {

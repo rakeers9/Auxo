@@ -76,19 +76,10 @@ export function evaluatePolicyWithContext(state: PolicyState): PolicyEvaluation 
   return { lane, factors };
 }
 
-export function createPolicyVerdict(
-  cart: Cart,
-  userId: string,
-  lane: Lane,
-  version: string,
-): Verdict {
+export function createPolicyVerdict(decisionId: string, lane: Lane): Verdict {
   const policy = LANE_POLICY[lane];
-  const digest = createHash("sha256")
-    .update(`auxo-policy:${userId}:${cart.cart_hash}:${version}`)
-    .digest("hex");
-  const variant = ((Number.parseInt(digest[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
   return {
-    decision_id: `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-${variant}${digest.slice(17, 20)}-${digest.slice(20, 32)}`,
+    decision_id: decisionId,
     lane,
     action: policy.action,
     template_id: policy.templateId,
