@@ -135,6 +135,32 @@ describe("click tracking lines", () => {
     expect(text).toContain("pending confirmation");
   });
 
+  it("shows the cart sidebar reading and what happened with the last change", () => {
+    const { root, panel } = mount();
+    panel.update(
+      snapshot({
+        sidebar: {
+          reading: { draft, problems: [] },
+          lastChange: "removed Lamp \u00d71: not sent (no Auxo decision covered it)",
+        },
+      }),
+    );
+    const text = root.textContent ?? "";
+
+    expect(text).toContain("Cart sidebar");
+    expect(text).toContain("Ceramic mug \u00d73");
+    expect(text).toContain("$63.96");
+    expect(text).toContain("not sent (no Auxo decision covered it)");
+  });
+
+  it("shows why the sidebar couldn't be read", () => {
+    const { root, panel } = mount();
+    panel.update(snapshot({ sidebar: { reading: { draft: null, problems: ["subtotal mismatch"] }, lastChange: null } }));
+
+    expect(root.textContent).toContain("subtotal mismatch");
+    expect(root.textContent).toContain("none seen yet");
+  });
+
   it("shows a note when there is one", () => {
     const { root, panel } = mount();
     panel.update(snapshot({ note: "handed over by the worker" }));

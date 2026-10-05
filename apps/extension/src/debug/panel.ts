@@ -1,7 +1,7 @@
 import type { Lane } from "@auxo/shared";
 import type { Trigger, UserAction } from "@auxo/shared";
 
-import type { ClickSignal, DecideFailureReason, PageInspection } from "../messages";
+import type { CartDraft, ClickSignal, DecideFailureReason, PageInspection } from "../messages";
 
 export type BackendStatus =
   | { status: "not_asked" }
@@ -24,6 +24,11 @@ export interface DebugSnapshot {
   pendingPurchase?: string | null;
   // Anything else worth knowing about this page's answer.
   note?: string | null;
+  // The store's cart sidebar (Amazon's nav cart flyout), if it has one.
+  sidebar?: {
+    reading: { draft: CartDraft | null; problems: string[] } | null;
+    lastChange: string | null;
+  } | null;
 }
 
 export interface DebugPanel {
@@ -143,6 +148,20 @@ function renderBody(doc: Document, s: DebugSnapshot): Node[] {
       ul.append(li);
     }
     nodes.push(ul);
+  }
+
+  if (s.sidebar) {
+    nodes.push(heading(doc, "Cart sidebar"));
+    const reading = s.sidebar.reading;
+    const rows: Array<[string, string, string?]> = [];
+    if (!reading) rows.push(["reading", "not on this page"]);
+    else if (reading.draft) {
+      const d = reading.draft;
+      rows.push(["items", d.items.map((i) => `${i.name} \u00d7${i.qty}`).join("; ")]);
+      rows.push(["subtotal", money(d.total_minor, d.currency)]);
+    } else rows.push(["reading", reading.problems.join("; ") || "nothing read", "problem"]);
+    rows.push(["last change", s.sidebar.lastChange ?? "none seen yet"]);
+    nodes.push(list(doc, rows));
   }
 
   if (s.events && s.events.length > 0) {

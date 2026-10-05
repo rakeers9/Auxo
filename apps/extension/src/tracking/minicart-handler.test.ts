@@ -59,6 +59,20 @@ describe("createMiniCartHandler", () => {
     expect(t.sent).toEqual([]);
   });
 
+  it("reports each change, including removals it couldn't link", async () => {
+    const reports: unknown[] = [];
+    const handler = createMiniCartHandler({
+      decisionFor: async () => null,
+      sendEvent: () => {},
+      decideAdded: async () => {},
+      pageType: () => "product",
+      report: (r) => reports.push(r),
+    });
+    await handler.onChange(cart([mug, lamp]), cart([mug]), { removed: [lamp], added: [] });
+
+    expect(reports).toEqual([{ removed: [lamp], added: [], linkedDecision: null, askedAbout: [] }]);
+  });
+
   it("asks for a fresh decision when items are added from the sidebar", async () => {
     const t = setup("product");
     await t.handler.onChange(cart([mug]), cart([{ ...mug, qty: 4 }]), { removed: [], added: [{ ...mug, qty: 1 }] });

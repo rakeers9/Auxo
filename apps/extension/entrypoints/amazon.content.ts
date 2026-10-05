@@ -3,7 +3,7 @@ import { defineContentScript } from "wxt/utils/define-content-script";
 import { inspectAmazonPage, readAmazonMiniCart } from "../src/cart";
 import { classifyClick, classifySubmit } from "../src/clicks";
 import { startStore, type StoreAdapter } from "../src/content/runtime";
-import { watchMiniCart } from "../src/tracking/sidesheet";
+import { MINI_CART, watchMiniCart } from "../src/tracking/sidesheet";
 import { watchForChanges } from "../src/watch";
 
 const RECHECK_DEBOUNCE_MS = 500;
@@ -12,6 +12,11 @@ const RECHECK_DEBOUNCE_MS = 500;
 const amazon: StoreAdapter = {
   inspect: (overrides) => inspectAmazonPage(document, new URL(location.href), overrides?.selectors),
   panelInspection: (overrides) => inspectAmazonPage(document, new URL(location.href), overrides?.selectors),
+  panelSidebar: (overrides) => {
+    if (!document.querySelector(MINI_CART)) return null;
+    const reading = readAmazonMiniCart(document, new URL(location.href), overrides?.selectors);
+    return { draft: reading.draft, problems: reading.problems };
+  },
   classifyClick: (target, url, overrides) => classifyClick(target, url, overrides?.buttons),
   classifySubmit: (form, submitter, url, overrides) => classifySubmit(form, submitter, url, overrides?.buttons),
   watch: ({ onPageChange, miniCart, overrides, loadedAs, ignore }) => {

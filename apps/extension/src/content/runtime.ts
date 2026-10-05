@@ -68,6 +68,8 @@ export interface StoreAdapter {
   inspect(overrides: StoreOverrides | null): PageInspection | Promise<PageInspection>;
   // A synchronous reading for the debug panel, if the store can do one.
   panelInspection?(overrides: StoreOverrides | null): PageInspection;
+  // The store's cart sidebar, for the debug panel (null when there's none).
+  panelSidebar?(overrides: StoreOverrides | null): { draft: CartDraft | null; problems: string[] } | null;
   classifyClick(target: EventTarget | null, url: URL, overrides: StoreOverrides | null): ClickSignal | null;
   classifySubmit(form: HTMLFormElement, submitter: Element | null, url: URL, overrides: StoreOverrides | null): ClickSignal | null;
   // Start noticing page and cart changes; returns a function that stops.
@@ -97,6 +99,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   let lastClick: { signal: ClickSignal; at: Date } | null = null;
   let pendingPurchase: string | null = null;
   let note: string | null = null;
+  let sidebarChange: string | null = null;
   const events: Array<{ action: UserAction; decisionId: string; at: Date }> = [];
 
   // The backend's overrides for this store (set once the config loads).
@@ -133,6 +136,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       events,
       pendingPurchase,
       note,
+      sidebar: adapter.panelSidebar
+        ? { reading: adapter.panelSidebar(overrides), lastChange: sidebarChange }
+        : null,
     });
   };
 
@@ -352,6 +358,24 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       if (result.ok) void show(result.verdict);
     },
     pageType: () => lastInspection.pageType,
+    report: (r) => {
+      const items = (list: typeof r.removed) => list.map((i) => `${i.name} \u00d7${i.qty}`).join(", ");
+      const parts: string[] = [];
+      if (r.removed.length > 0) {
+        parts.push(
+          `removed ${items(r.removed)}: ${
+            r.linkedDecision ? `sent "removed" for decision ${r.linkedDecision}` : "not sent (no Auxo decision covered it)"
+          }`,
+        );
+      }
+      if (r.added.length > 0) {
+        parts.push(
+          r.askedAbout.length > 0 ? `added ${items(r.added)}: asked the backend` : `added ${items(r.added)}: already decided at the click`,
+        );
+      }
+      sidebarChange = `${new Date().toLocaleTimeString()} ${parts.join("; ")}`;
+      refreshDebug();
+    },
   });
 
   const tracker = createTracker({

@@ -13,6 +13,19 @@ export interface MiniCartHandlerDeps {
   decideAdded(draft: CartDraft, trigger: Trigger): Promise<void>;
   pageType(): PageType;
   now?: () => Date;
+  // What happened with each change, for the debug panel.
+  report?(report: SidebarReport): void;
+}
+
+export interface SidebarReport {
+  removed: RemovedItem[];
+  added: RemovedItem[];
+  // For removals: the decision it was linked to, or null if no remembered
+  // decision covered those items (then nothing is sent).
+  linkedDecision: string | null;
+  // Added items asked about as a new add to cart (after subtracting a
+  // clicked add that was already decided).
+  askedAbout: RemovedItem[];
 }
 
 export interface MiniCartHandler {
@@ -46,8 +59,10 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
     },
 
     async onChange(before, after, diff) {
+      let linkedDecision: string | null = null;
       if (diff.removed.length > 0) {
         const decisionId = await deps.decisionFor(diff.removed);
+        linkedDecision = decisionId;
         // No decision ever covered these items: nothing to attribute the removal to.
         if (decisionId) {
           deps.sendEvent(
@@ -70,6 +85,7 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
 
       const { remaining, unused } = subtract(diff.added, clicked);
       clicked = unused;
+      deps.report?.({ removed: diff.removed, added: diff.added, linkedDecision, askedAbout: remaining });
       if (remaining.length === 0) return;
 
       const draft: CartDraft = {
