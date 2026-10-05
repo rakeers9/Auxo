@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-export const UserActionSchema = z.enum(["left", "saved", "overrode", "bought"]);
+// removed: the user took an item out of the cart after a decision.
+// bought: the purchase went through (metadata carries what was bought).
+export const UserActionSchema = z.enum(["left", "saved", "overrode", "removed", "bought"]);
 
 export const DecisionEventSchema = z
   .object({

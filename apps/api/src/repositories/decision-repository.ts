@@ -1,4 +1,4 @@
-import type { Cart, DecisionContext, Verdict } from "@auxo/shared";
+import type { Cart, DecisionContext, Trigger, Verdict } from "@auxo/shared";
 
 export interface DecisionRecord {
   userId: string;
@@ -11,6 +11,8 @@ export interface DecisionRecord {
   context: DecisionContext;
   expiresAt: string;
   createdAt: string;
+  // What prompted the request (a buy-intent click or a page view), if sent.
+  trigger?: Trigger;
 }
 
 export interface OwnedDecision {

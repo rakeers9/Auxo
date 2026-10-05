@@ -2,9 +2,11 @@ import { z } from "zod";
 
 import { CartSchema } from "./cart.js";
 import { DecisionContextSchema } from "./decision-context.js";
+import { TriggerSchema } from "./trigger.js";
 import { VerdictSchema } from "./verdict.js";
 
-export const DecideRequestSchema = z.object({ cart: CartSchema }).strict();
+// trigger is optional so older clients keep working.
+export const DecideRequestSchema = z.object({ cart: CartSchema, trigger: TriggerSchema.optional() }).strict();
 export const DecideResponseSchema = VerdictSchema.extend({
   context: DecisionContextSchema,
 }).strict();

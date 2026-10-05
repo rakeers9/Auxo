@@ -6,6 +6,7 @@ import { DecideResponseSchema } from "@auxo/shared";
 
 import { buildApp } from "./app.js";
 import type { AuthService } from "./auth/auth-service.js";
+import { InMemoryDecisionRepository } from "./repositories/decision-repository.js";
 
 const openApps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
@@ -87,6 +88,56 @@ describe("POST /v1/decide", () => {
       });
       expect(event.statusCode).toBe(201);
     }
+  });
+
+  it("accepts a trigger and stores it with the decision", async () => {
+    const decisionRepository = new InMemoryDecisionRepository();
+    const app = await buildApp({ decisionRepository });
+    openApps.push(app);
+    const trigger = {
+      intent: "add_to_cart",
+      source: "known",
+      page_type: "product",
+      occurred_at: "2026-10-04T20:00:00.000Z",
+      label: "Add to Cart",
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("4"), trigger },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(decisionRepository.list()[0]?.trigger).toEqual(trigger);
+  });
+
+  it("still accepts a decide request without a trigger", async () => {
+    const decisionRepository = new InMemoryDecisionRepository();
+    const app = await buildApp({ decisionRepository });
+    openApps.push(app);
+
+    const response = await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("1") } });
+
+    expect(response.statusCode).toBe(200);
+    expect(decisionRepository.list()[0]?.trigger).toBeUndefined();
+  });
+
+  it("rejects an invalid trigger", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: {
+        cart: cartWithHashSuffix("1"),
+        trigger: { intent: "wishlist", source: "known", page_type: "product", occurred_at: "2026-10-04T20:00:00.000Z" },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
   });
 
   it("rejects an invalid cart", async () => {
@@ -251,6 +302,27 @@ describe("POST /v1/events", () => {
     expect(first.json()).toEqual({ accepted: true, duplicate: false });
     expect(second.statusCode).toBe(200);
     expect(second.json()).toEqual({ accepted: true, duplicate: true });
+  });
+
+  it.each(["removed", "bought"])("accepts a %s event", async (action) => {
+    const app = await buildApp();
+    openApps.push(app);
+    const decisionId = (await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("2") } })).json()
+      .decision_id as string;
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      payload: {
+        event_id: randomUUID(),
+        decision_id: decisionId,
+        action,
+        occurred_at: "2026-10-04T12:00:00.000Z",
+        metadata: { items: [{ name: "Example item", price_minor: 2_500, qty: 1 }], total_minor: 2_500 },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
   });
 
   it("does not expose another user's decision", async () => {

@@ -139,7 +139,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       });
     }
 
-    const verdict = await decisionService.decide(user.id, parsed.data.cart);
+    const verdict = await decisionService.decide(user.id, parsed.data.cart, parsed.data.trigger);
     return reply.status(200).send(verdict);
   });
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Budget, Cart, DecideResponse, DecisionContext, Lane, Verdict } from "@auxo/shared";
+import type { Budget, Cart, DecideResponse, Trigger, DecisionContext, Lane, Verdict } from "@auxo/shared";
 
 import type { DecisionRepository } from "../repositories/decision-repository.js";
 import type { SettingsRepository } from "../repositories/settings-repository.js";
@@ -31,7 +31,7 @@ export class DecisionService {
 
   // Every request is analyzed fresh and gets its own decision_id; past
   // decisions are never reused, so the same cart can get a different answer.
-  public async decide(userId: string, cart: Cart): Promise<DecideResponse> {
+  public async decide(userId: string, cart: Cart, trigger?: Trigger): Promise<DecideResponse> {
     const now = this.now();
     const [rules, budgets] = this.options.settingsRepository
       ? await Promise.all([
@@ -96,6 +96,7 @@ export class DecisionService {
       context,
       expiresAt: expiresAt.toISOString(),
       createdAt: now.toISOString(),
+      ...(trigger ? { trigger } : {}),
     });
 
     return { ...verdict, context };

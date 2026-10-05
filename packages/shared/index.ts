@@ -6,4 +6,5 @@ export * from "./decision-context.js";
 export * from "./events.js";
 export * from "./passes.js";
 export * from "./rules.js";
+export * from "./trigger.js";
 export * from "./verdict.js";

@@ -32,6 +32,7 @@ export class SupabaseDecisionRepository implements DecisionRepository {
         model_version: record.modelVersion,
         model_output: record.modelOutput ?? null,
         decision_context: record.context,
+        trigger: record.trigger ?? null,
         expires_at: record.expiresAt,
       },
     );
