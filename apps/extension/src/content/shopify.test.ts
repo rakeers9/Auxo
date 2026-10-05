@@ -5,7 +5,6 @@ import { CartSchema } from "@auxo/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { hashCart } from "../cart";
-import type { MiniCartHandler } from "../tracking/minicart-handler";
 import { createShopifyAdapter, readShopifyCartFrom } from "./shopify";
 
 // Real responses saved from public Shopify stores (see src/cart/__fixtures__/shopify).
@@ -84,6 +83,11 @@ describe("createShopifyAdapter", () => {
     expect(signal).toMatchObject({ intent: "checkout", source: "known" });
   });
 
+  it("reads the whole cart from /cart.js for the cross-tab check", async () => {
+    const draft = await adapterAt("https://www.allbirds.com/pages/about").fullCart!(null);
+    expect(draft?.items.length).toBeGreaterThan(0);
+  });
+
   it("watches /cart.js and reports an add as a cart change", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<div id="cart-count">0</div>';
@@ -91,11 +95,10 @@ describe("createShopifyAdapter", () => {
     let body = JSON.stringify({ ...full, items: full.items.slice(0, 1), items_subtotal_price: full.items[0].final_line_price, item_count: full.items[0].quantity });
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(body));
     const onChange = vi.fn();
-    const miniCart = { onChange, noteClickedAdd: vi.fn(), noteAddClick: vi.fn() } as unknown as MiniCartHandler;
 
     const stop = adapterAt("https://www.allbirds.com/products/x", fetchMock).watch({
       onPageChange: () => {},
-      miniCart,
+      reportChange: onChange,
       overrides: null,
       loadedAs: "product",
       ignore: () => [],

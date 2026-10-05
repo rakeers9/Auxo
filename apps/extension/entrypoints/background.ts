@@ -7,6 +7,8 @@ import {
   handleDecideMessage,
   handleEventMessage,
   isAckMessage,
+  isCartLoadMessage,
+  isCartRecordMessage,
   isClaimMessage,
   isConfigMessage,
   isDecideMessage,
@@ -15,13 +17,14 @@ import {
   isWishlistSaveMessage,
   triggerOf,
 } from "../src/api/handler";
+import { createCartState } from "../src/api/cart-state";
 import { createDecisionMemory, type RememberedCart } from "../src/api/decision-memory";
 import { createHandoff } from "../src/api/handoff";
 import { createConfigCache, fetchStoreConfig, overridesFor } from "../src/api/store-config";
 import { API_BASE_URL } from "../src/config";
 import { saveDecisionToWishlist } from "../src/wishlist/save";
 import { createWishlist } from "../src/wishlist/store";
-import type { ClaimResult, ConfigResult, DecisionForResult } from "../src/messages";
+import type { CartLoadResult, ClaimResult, ConfigResult, DecisionForResult } from "../src/messages";
 
 export default defineBackground(() => {
   // Holds add-to-cart answers across page changes in a tab.
@@ -34,6 +37,11 @@ export default defineBackground(() => {
   browser.tabs.onRemoved.addListener((tabId) => handoff.forget(tabId));
   // "Save for later" items, shown in the toolbar popup.
   const wishlist = createWishlist({
+    get: (key) => browser.storage.local.get(key),
+    set: (items) => browser.storage.local.set(items),
+  });
+  // The last cart any tab saw per store, to catch changes made elsewhere.
+  const cartState = createCartState({
     get: (key) => browser.storage.local.get(key),
     set: (items) => browser.storage.local.set(items),
   });
@@ -71,6 +79,14 @@ export default defineBackground(() => {
     }
     if (isConfigMessage(message)) {
       void config.get().then((c) => sendResponse({ overrides: overridesFor(c, message.host) } satisfies ConfigResult));
+      return true;
+    }
+    if (isCartRecordMessage(message)) {
+      void cartState.record(message.merchant, message.cart);
+      return;
+    }
+    if (isCartLoadMessage(message)) {
+      void cartState.compareAtLoad(message.merchant, message.cart).then((change) => sendResponse({ change } satisfies CartLoadResult));
       return true;
     }
     if (isWishlistSaveMessage(message)) {

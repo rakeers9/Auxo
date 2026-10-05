@@ -47,8 +47,10 @@ export interface MiniCartHandler {
   // items weren't read at the click, +, −, delete, save for later): the next
   // matching change is credited to it in the trigger.
   noteEditClick(signal: ClickSignal): void;
-  // `source` says where the change was seen (default: deps.source, else mini_cart).
-  onChange(before: CartDraft, after: CartDraft, diff: MiniCartDiff, source?: string): Promise<void>;
+  // `source` says where the change was seen (default: deps.source, else
+  // mini_cart). `label` describes a change no click explains (e.g. one made
+  // in another tab, noticed at page load).
+  onChange(before: CartDraft, after: CartDraft, diff: MiniCartDiff, options?: { source?: string; label?: string }): Promise<void>;
 }
 
 const ADDING = new Set<TriggerIntent>(["add_to_cart", "increase_qty"]);
@@ -68,13 +70,16 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
   let addClick: ClickSignal | null = null;
   let removeClick: ClickSignal | null = null;
 
-  const triggerFor = (click: ClickSignal | null, fallback: TriggerIntent): Trigger => ({
-    intent: click?.intent ?? fallback,
-    source: click?.source ?? "page",
-    page_type: triggerPageType(deps.pageType()),
-    occurred_at: now().toISOString(),
-    ...(click?.label ? { label: click.label } : {}),
-  });
+  const triggerFor = (click: ClickSignal | null, fallback: TriggerIntent, label?: string): Trigger => {
+    const shown = click?.label ?? label;
+    return {
+      intent: click?.intent ?? fallback,
+      source: click?.source ?? "page",
+      page_type: triggerPageType(deps.pageType()),
+      occurred_at: now().toISOString(),
+      ...(shown ? { label: shown } : {}),
+    };
+  };
 
   const draftOf = (items: RemovedItem[], cart: CartDraft): CartDraft => ({
     merchant: cart.merchant,
@@ -96,7 +101,9 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
       clicked.push(...draft.items.map((item) => ({ ...item })));
     },
 
-    async onChange(before, after, diff, source) {
+    async onChange(before, after, diff, options = {}) {
+      const source = options.source;
+      const label = options.label;
       let linkedDecision: string | null = null;
       let removedEventDecision: string | null = null;
       let removeIntent: TriggerIntent | null = null;
@@ -105,7 +112,7 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
         linkedDecision = await deps.decisionFor(diff.removed);
         // Gone entirely vs. a lower quantity, when no click says which.
         const goneEntirely = diff.removed.every((r) => !after.items.some((i) => i.name === r.name && i.price_minor === r.price_minor));
-        const trigger = triggerFor(removeClick, goneEntirely ? "remove_item" : "decrease_qty");
+        const trigger = triggerFor(removeClick, goneEntirely ? "remove_item" : "decrease_qty", label);
         removeClick = null;
         removeIntent = trigger.intent;
         // Every removal is asked about, so it's tracked even when nothing
@@ -138,7 +145,7 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
       clicked = unused;
       let addIntent: TriggerIntent | null = null;
       if (remaining.length > 0) {
-        const trigger = triggerFor(addClick, "add_to_cart");
+        const trigger = triggerFor(addClick, "add_to_cart", label);
         addClick = null;
         addIntent = trigger.intent;
         await deps.decide(draftOf(remaining, after), trigger);

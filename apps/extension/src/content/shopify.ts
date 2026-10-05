@@ -55,11 +55,13 @@ export function createShopifyAdapter(deps: { fetch: typeof fetch; location: () =
     classifySubmit: (form, submitter, url, overrides: StoreOverrides | null) =>
       classifySubmit(form, submitter, url, overrides?.buttons, "shopify"),
     classifyChange: (target, url, overrides: StoreOverrides | null) => classifyChange(target, url, overrides?.buttons, "shopify"),
-    watch: ({ miniCart, ignore }) => {
+    watch: ({ reportChange, ignore }) => {
       const watcher = watchCartApi(deps.doc, async () => (await read()).draft, {
-        onChange: (before, after, diff) => void miniCart.onChange(before, after, diff),
+        onChange: (before, after, diff) => reportChange(before, after, diff),
       }, { ignore });
       return () => watcher.stop();
     },
+    // /cart.js is always the whole cart.
+    fullCart: async () => (await read()).draft,
   };
 }

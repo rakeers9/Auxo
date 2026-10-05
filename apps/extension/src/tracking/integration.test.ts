@@ -56,7 +56,7 @@ function openPage(fixture: string, href: string) {
     flow,
     pending: createPendingStore(sessionStorage),
     inspect: () => inspectAmazonPage(document, url()),
-    onCartDiff: (before, after, diff) => cartHandler.onChange(before, after, diff, "cart_page"),
+    onCartDiff: (before, after, diff) => cartHandler.onChange(before, after, diff, { source: "cart_page" }),
   });
   const intents: Array<Promise<unknown>> = [];
   const stop = listenForBuyIntents(document, { classifyClick, classifySubmit }, (s) => intents.push(tracker.onBuyIntent(s)), url);
@@ -342,5 +342,51 @@ describe("blocking a purchase on the real checkout page", () => {
     expect(t.click().defaultPrevented).toBe(true);
     expect(t.placeOrder).not.toHaveBeenCalled();
     t.stop();
+  });
+});
+
+describe("changes made outside this tab", () => {
+  it("a page load that shows a smaller cart than any tab last saw reports the removal", async () => {
+    const { createCartState } = await import("../api/cart-state");
+    const data: Record<string, unknown> = {};
+    const state = createCartState({
+      get: async (key) => (key in data ? { [key]: structuredClone(data[key]) } : {}),
+      set: async (items) => void Object.assign(data, structuredClone(items)),
+    });
+    const keyboard = { name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 };
+    const mugs = { name: "Ceramic coffee mug, 12 oz, matte black", price_minor: 999, qty: 3 };
+    const cartOf = (items: Array<typeof mugs>) => ({
+      merchant: "amazon.com",
+      items,
+      total_minor: items.reduce((s, i) => s + i.price_minor * i.qty, 0),
+      currency: "USD",
+      url: "https://www.amazon.com/gp/cart/view.html",
+    });
+
+    // Another tab saw (and reported) the cart with both items.
+    await state.record("amazon.com", cartOf([keyboard, mugs]));
+
+    // This tab loads fresh; the keyboard was removed in the Amazon app meanwhile.
+    const change = await state.compareAtLoad("amazon.com", cartOf([mugs]));
+    expect(change?.diff.removed).toEqual([keyboard]);
+
+    const decided: Array<{ trigger: Trigger }> = [];
+    const handler = createMiniCartHandler({
+      decisionFor: async () => null,
+      sendEvent: () => {},
+      decide: async (_cart, trigger) => {
+        decided.push({ trigger });
+        return "33333333-3333-4333-8333-333333333333";
+      },
+      pageType: () => "other",
+    });
+    await handler.onChange(change!.before, change!.after, { removed: change!.diff.removed, added: change!.diff.added }, {
+      source: "elsewhere",
+      label: "changed outside this tab",
+    });
+
+    expect(decided[0]!.trigger).toMatchObject({ intent: "remove_item", source: "page", label: "changed outside this tab" });
+    // And the next load of the same cart reports nothing again.
+    expect(await state.compareAtLoad("amazon.com", cartOf([mugs]))).toBeNull();
   });
 });

@@ -13,6 +13,9 @@ import { CONTENT_TIMEOUT_MS, createCartFlow, type CartFlowOutcome } from "../flo
 import type {
   AckMessage,
   CartDraft,
+  CartLoadMessage,
+  CartLoadResult,
+  CartRecordMessage,
   ClaimMessage,
   ClaimResult,
   ClickSignal,
@@ -32,7 +35,8 @@ import type {
 import { renderClickAgainHint, renderOverlay, type OverlayHandle } from "../overlay";
 import { createClickGate } from "../tracking/gate";
 import { listenForBuyIntents } from "../tracking/listener";
-import { createMiniCartHandler, type MiniCartHandler } from "../tracking/minicart-handler";
+import { createMiniCartHandler } from "../tracking/minicart-handler";
+import type { MiniCartDiff } from "../tracking/sidesheet";
 import { createPendingStore } from "../tracking/pending";
 import { createTracker } from "../tracking/tracker";
 
@@ -54,8 +58,9 @@ const DEV_VERDICT: Verdict = {
 export interface WatchApi {
   // Re-check the page through the tracker (re-decide on change, removals).
   onPageChange(): void;
-  // Sidebar / network cart changes: removals and adds.
-  miniCart: MiniCartHandler;
+  // A full cart (sidebar or network) changed: removals and adds are asked
+  // about, and the new cart is recorded for other tabs.
+  reportChange(before: CartDraft, after: CartDraft, diff: MiniCartDiff): void;
   overrides: StoreOverrides | null;
   loadedAs: PageType;
   // Our own UI, which must never count as a page change.
@@ -76,6 +81,10 @@ export interface StoreAdapter {
   classifyChange?(target: EventTarget | null, url: URL, overrides: StoreOverrides | null): ClickSignal | null;
   // Start noticing page and cart changes; returns a function that stops.
   watch(api: WatchApi): () => void;
+  // The whole cart as this page shows it (not one product), if it can tell.
+  // Compared at load with the last cart any tab saw, to catch changes made
+  // elsewhere (another tab, the app).
+  fullCart?(overrides: StoreOverrides | null): CartDraft | null | Promise<CartDraft | null>;
 }
 
 // Clicks whose effect shows up as a cart change (sidebar or /cart.js).
@@ -397,12 +406,52 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     },
   });
 
+  // Every change this tab reports goes through here: asked about, then the
+  // new cart is recorded so another tab's next load doesn't report it again.
+  const reportCartChange = async (
+    before: CartDraft,
+    after: CartDraft,
+    diff: MiniCartDiff,
+    options: { source?: string; label?: string } = {},
+  ) => {
+    await miniCart.onChange(before, after, diff, options);
+    void browser.runtime
+      .sendMessage<CartRecordMessage>({ type: "auxo:cart-record", merchant: after.merchant, cart: after })
+      .catch(() => {});
+  };
+
+  // At load: was the cart changed somewhere Auxo didn't see (another tab,
+  // the app)? Only fresh page loads are compared; a re-read of an old page
+  // would be stale.
+  const checkElsewhere = async () => {
+    const cart = await Promise.resolve(adapter.fullCart?.(overrides) ?? null).catch(() => null);
+    if (!cart || ctx.isInvalid) return;
+    const result = await browser.runtime
+      .sendMessage<CartLoadMessage, CartLoadResult>({ type: "auxo:cart-load", merchant: cart.merchant, cart })
+      .catch(() => null);
+    const change = result?.change;
+    if (!change) return;
+    if (change.diff.repriced.length > 0) {
+      note = `prices changed since last seen: ${change.diff.repriced
+        .map((r) => `${r.name} ${r.before_minor}\u2192${r.after_minor}`)
+        .join(", ")}`;
+      refreshDebug();
+    }
+    if (change.diff.removed.length === 0 && change.diff.added.length === 0) return;
+    await miniCart.onChange(
+      change.before,
+      change.after,
+      { removed: change.diff.removed, added: change.diff.added },
+      { source: "elsewhere", label: "changed outside this tab" },
+    );
+  };
+
   const tracker = createTracker({
     flow,
     pending: createPendingStore(sessionStorageOrNull()),
     inspect: () => inspect(),
     // Cart and checkout page edits are handled like sidebar edits.
-    onCartDiff: (before, after, diff) => miniCart.onChange(before, after, diff, "cart_page"),
+    onCartDiff: (before, after, diff) => reportCartChange(before, after, diff, { source: "cart_page" }),
     note: (n) => {
       if (n.kind === "click") lastClick = { signal: n.signal, at: n.at };
       if (n.kind === "outcome") record(n.outcome);
@@ -442,10 +491,11 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   step(async () => {
     await claimHandoff();
     await tracker.onLoad();
+    await checkElsewhere();
   })();
   const stopWatching = adapter.watch({
     onPageChange: step(() => tracker.onPageChange()),
-    miniCart,
+    reportChange: (before, after, diff) => void reportCartChange(before, after, diff),
     overrides,
     loadedAs: (await inspect()).pageType,
     ignore: () => [ui?.shadowHost, hintUi?.shadowHost, debugUi?.shadowHost],

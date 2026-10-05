@@ -36,7 +36,14 @@ const amazon: StoreAdapter = {
   classifyClick: (target, url, overrides) => classifyClick(target, url, overrides?.buttons),
   classifySubmit: (form, submitter, url, overrides) => classifySubmit(form, submitter, url, overrides?.buttons),
   classifyChange: (target, url, overrides) => classifyChange(target, url, overrides?.buttons),
-  watch: ({ onPageChange, miniCart, overrides, loadedAs, ignore }) => {
+  // The cart page reads the whole cart; elsewhere the cart sidebar does.
+  fullCart: (overrides) => {
+    const url = new URL(location.href);
+    const page = inspectAmazonPage(document, url, overrides?.selectors);
+    if (page.pageType === "cart") return page.draft;
+    return document.querySelector(MINI_CART) ? readAmazonMiniCart(document, url, overrides?.selectors).draft : null;
+  },
+  watch: ({ onPageChange, reportChange, overrides, loadedAs, ignore }) => {
     const stopPage = watchForChanges(document.body, onPageChange, {
       debounceMs: RECHECK_DEBOUNCE_MS,
       ignore,
@@ -48,7 +55,7 @@ const amazon: StoreAdapter = {
       loadedAs === "cart" || loadedAs === "checkout"
         ? () => {}
         : watchMiniCart(document, () => readAmazonMiniCart(document, new URL(location.href), overrides?.selectors).draft, {
-            onChange: (before, after, diff) => void miniCart.onChange(before, after, diff),
+            onChange: (before, after, diff) => reportChange(before, after, diff),
           });
     return () => {
       stopPage();
