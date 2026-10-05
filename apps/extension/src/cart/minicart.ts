@@ -1,6 +1,6 @@
 import type { CartDraft } from "../messages";
 import { parsePriceToMinor } from "./price";
-import { CURRENCY, cleanName, finishReading, quote, type Reading } from "./reading";
+import { CURRENCY, cleanName, emptyReading, finishReading, quote, type Reading } from "./reading";
 import { AMAZON_SELECTORS, resolveAmazonSelectors, withConfigNotes, type AmazonSelectors, type SelectorOverrides } from "./selectors";
 
 // The nav mini cart (#nav-flyout-ewc) lists the whole cart on most amazon.com
@@ -76,12 +76,25 @@ export function readAmazonMiniCart(doc: Document, url: URL, overrides?: Selector
     "mini cart subtotal": quote(scan.subtotalText),
   };
 
-  if (scan.seen - scan.skipped === 0) problems.push("the mini cart is empty or not loaded");
+  const cartUrl = `${url.origin}/gp/cart/view.html`;
+  if (scan.seen - scan.skipped === 0) {
+    // Verifiably empty only as the real page shows it right after the last
+    // item is deleted: its line stays (marked removed), the subtotal reads
+    // $0.00, and the nav bar counts 0. No lines at all may just mean the
+    // flyout hasn't loaded, so that stays unreadable.
+    const navCount = doc.querySelector(s["nav.cartCount"])?.textContent?.trim() ?? null;
+    details["nav cart count"] = quote(navCount);
+    if (scan.seen > 0 && scan.problems.length === 0 && scan.subtotal === 0 && navCount === "0") {
+      details.empty = "yes";
+      return withConfigNotes(emptyReading(cartUrl, details), notes);
+    }
+    problems.push("the mini cart is empty or not loaded");
+  }
   if (scan.subtotal === null && scan.seen - scan.skipped > 0) {
     problems.push(scan.subtotalText === null ? `no mini cart subtotal (${s["minicart.subtotal"]})` : `mini cart subtotal ${quote(scan.subtotalText)} isn't a readable price`);
   }
 
   const items: CartDraft["items"] = scan.lines.map(({ name, price_minor, qty }) => ({ name, price_minor, qty }));
   // The cart page's URL: the mini cart is the cart, whatever page shows it.
-  return withConfigNotes(finishReading(`${url.origin}/gp/cart/view.html`, items, scan.subtotal, problems, details, { totalLabel: "the mini cart subtotal" }), notes);
+  return withConfigNotes(finishReading(cartUrl, items, scan.subtotal, problems, details, { totalLabel: "the mini cart subtotal" }), notes);
 }

@@ -10,6 +10,13 @@ import minicartHtml from "./__fixtures__/amazon-product-minicart.html?raw";
 import addedHtml from "./__fixtures__/amazon-added-to-cart.html?raw";
 import productHtml from "./__fixtures__/amazon-product.html?raw";
 import cartHtml from "./__fixtures__/amazon-cart.html?raw";
+// Real saves of the mini cart with one item: before, right after +, right after −.
+import sidebarBeforeHtml from "./__fixtures__/amazon-sidebar-before.html?raw";
+import sidebarMinusHtml from "./__fixtures__/amazon-sidebar-after-minus.html?raw";
+import sidebarPlusHtml from "./__fixtures__/amazon-sidebar-after-plus.html?raw";
+// Real saves of a one-item mini cart before and right after deleting that item.
+import deleteLastAfterHtml from "./__fixtures__/amazon-sidebar-after-delete-last.html?raw";
+import deleteLastBeforeHtml from "./__fixtures__/amazon-sidebar-before-delete-last.html?raw";
 
 const PRODUCT_URL = new URL("https://www.amazon.com/Water-Bottle/dp/B0TEST0006?th=1");
 
@@ -89,6 +96,91 @@ describe("readAmazonMiniCart", () => {
     const doc = parse(cartHtml);
     doc.getElementById("nav-flyout-ewc")?.remove();
     expect(readAmazonMiniCart(doc, new URL("https://www.amazon.com/gp/cart/view.html")).problems).toEqual(["the mini cart is empty or not loaded"]);
+  });
+
+  describe("real saves around + and − (quantities update in place)", () => {
+    const soap = (qty: number) => [{ name: "Unscented hand soap, 12 oz", price_minor: 1199, qty }];
+
+    it.each<[string, string, number, number]>([
+      ["before", sidebarBeforeHtml, 1, 1199],
+      ["after +", sidebarPlusHtml, 2, 2398],
+      ["after −", sidebarMinusHtml, 1, 1199],
+    ])("reads the cart %s", (_label, html, qty, total) => {
+      const reading = readAmazonMiniCart(parse(html), PRODUCT_URL);
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft?.items).toEqual(soap(qty));
+      expect(reading.draft?.total_minor).toBe(total);
+    });
+
+    it("keeps the same line through the edits; only its quantity changes", () => {
+      const ids = [sidebarBeforeHtml, sidebarPlusHtml, sidebarMinusHtml].map((html) =>
+        [...parse(html).querySelectorAll("#nav-flyout-ewc .ewc-item")].map((el) => el.getAttribute("data-itemid")),
+      );
+      expect(ids[1]).toEqual(ids[0]);
+      expect(ids[2]).toEqual(ids[0]);
+    });
+
+    it("hashes the + state differently, and the − state back to the original", async () => {
+      const read = (html: string) => readAmazonMiniCart(parse(html), PRODUCT_URL).draft!;
+      const before = read(sidebarBeforeHtml);
+      const plus = read(sidebarPlusHtml);
+      const minus = read(sidebarMinusHtml);
+      expect(await hashCart(plus)).not.toBe(await hashCart(before));
+      expect(await hashCart(minus)).toBe(await hashCart(before));
+    });
+
+    it("reads the + quantity from the line, agreeing with the nav count", () => {
+      // (The real save's hidden #ewc-total-quantity still said 1; it isn't kept
+      // in the fixture and the reader never uses it.)
+      expect(parse(sidebarPlusHtml).getElementById("nav-cart-count")?.textContent?.trim()).toBe("2");
+      expect(readAmazonMiniCart(parse(sidebarPlusHtml), PRODUCT_URL).draft?.items[0]?.qty).toBe(2);
+    });
+  });
+
+  describe("real saves around deleting the last item", () => {
+    it("reads the one-item cart before the delete", () => {
+      expect(readAmazonMiniCart(parse(deleteLastBeforeHtml), PRODUCT_URL).draft?.items).toEqual([
+        { name: "Fragrance-free body lotion, 4 oz", price_minor: 1699, qty: 1 },
+      ]);
+    });
+
+    it("reads the emptied cart as an empty draft: line marked removed, $0.00 subtotal, nav count 0", () => {
+      const doc = parse(deleteLastAfterHtml);
+      const line = doc.querySelector("#nav-flyout-ewc .ewc-item")!;
+      expect(line.querySelector(".ewc-item-remove-msg")!.classList.contains("aok-hidden")).toBe(false);
+      expect(subtotal(doc).textContent?.trim()).toBe("$0.00");
+
+      const reading = readAmazonMiniCart(doc, PRODUCT_URL);
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft).toEqual({
+        merchant: "amazon.com",
+        items: [],
+        total_minor: 0,
+        currency: "USD",
+        url: "https://www.amazon.com/gp/cart/view.html",
+      });
+      expect(reading.details).toEqual({
+        "mini cart items": "1",
+        "removed skipped": "1",
+        "mini cart subtotal": '"$0.00"',
+        "nav cart count": '"0"',
+        empty: "yes",
+      });
+    });
+
+    it.each<[string, (d: Document) => void]>([
+      ["the subtotal isn't $0.00 yet", (d) => { subtotal(d).textContent = "$16.99"; }],
+      ["the nav count isn't 0 yet", (d) => { d.getElementById("nav-cart-count")!.textContent = "1"; }],
+      ["the nav count is missing", (d) => d.getElementById("nav-cart-count")!.remove()],
+      ["the subtotal is missing", (d) => subtotal(d).remove()],
+      ["there are no lines at all (flyout not loaded)", (d) => { for (const el of d.querySelectorAll("#nav-flyout-ewc .ewc-item")) el.remove(); }],
+    ])("stays unreadable when %s", (_label, change) => {
+      const doc = parse(deleteLastAfterHtml);
+      change(doc);
+      const reading = readAmazonMiniCart(doc, PRODUCT_URL);
+      expect(reading.draft).toBeNull();
+      expect(reading.problems).toEqual(["the mini cart is empty or not loaded"]);
+    });
   });
 
   it("every mini cart draft plus its hash is a valid Cart", async () => {
