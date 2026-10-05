@@ -83,5 +83,5 @@ export function readAmazonMiniCart(doc: Document, url: URL, overrides?: Selector
 
   const items: CartDraft["items"] = scan.lines.map(({ name, price_minor, qty }) => ({ name, price_minor, qty }));
   // The cart page's URL: the mini cart is the cart, whatever page shows it.
-  return withConfigNotes(finishReading(`${url.origin}/gp/cart/view.html`, items, scan.subtotal, problems, details, "the mini cart subtotal"), notes);
+  return withConfigNotes(finishReading(`${url.origin}/gp/cart/view.html`, items, scan.subtotal, problems, details, { totalLabel: "the mini cart subtotal" }), notes);
 }

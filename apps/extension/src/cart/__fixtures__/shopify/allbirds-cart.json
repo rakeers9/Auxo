@@ -1,0 +1,38 @@
+{
+  "note": "",
+  "attributes": {},
+  "original_total_price": 20000,
+  "total_price": 20000,
+  "total_discount": 0,
+  "total_weight": 1452.2213,
+  "item_count": 2,
+  "items": [
+    {
+      "quantity": 2,
+      "title": "Men&#39;s Canvas Runner NZ - Deep Navy Stripes (Blizzard Sole) - 8.5",
+      "price": 10000,
+      "original_price": 10000,
+      "discounted_price": 10000,
+      "line_price": 20000,
+      "original_line_price": 20000,
+      "total_discount": 0,
+      "discounts": [],
+      "taxable": true,
+      "gift_card": false,
+      "final_price": 10000,
+      "final_line_price": 20000,
+      "line_level_discount_allocations": [],
+      "line_level_total_discount": 0,
+      "product_title": "Men's Canvas Runner NZ - Deep Navy Stripes (Blizzard Sole)",
+      "variant_title": "8.5",
+      "product_has_only_default_variant": false,
+      "vendor": "Allbirds",
+      "requires_shipping": true
+    }
+  ],
+  "requires_shipping": true,
+  "currency": "USD",
+  "items_subtotal_price": 20000,
+  "cart_level_discount_applications": [],
+  "discount_codes": []
+}
