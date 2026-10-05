@@ -147,3 +147,80 @@ describe("click tracking on real Amazon pages", () => {
     page.stop();
   });
 });
+
+describe("cart sidebar on a real product page", () => {
+  const url = new URL("https://www.amazon.com/Water-Bottle/dp/B0TEST0009");
+
+  async function setupSidebar() {
+    vi.useFakeTimers();
+    const { readAmazonMiniCart } = await import("../cart");
+    const { watchMiniCart, MINI_CART_DEBOUNCE_MS } = await import("./sidesheet");
+    const { createMiniCartHandler } = await import("./minicart-handler");
+    const { createDecisionMemory } = await import("../api/decision-memory");
+    const data: Record<string, unknown> = {};
+    const memory = createDecisionMemory({
+      get: async (key) => (key in data ? { [key]: data[key] } : {}),
+      set: async (items) => void Object.assign(data, items),
+    });
+
+    document.documentElement.innerHTML = readFileSync(resolve(FIXTURES, "amazon-product-minicart.html"), "utf8");
+    const events: DecisionEvent[] = [];
+    const decided: Array<{ cart: unknown; trigger: Trigger }> = [];
+    const handler = createMiniCartHandler({
+      decisionFor: (items) => memory.decisionFor(items),
+      sendEvent: (e) => events.push(e),
+      decideAdded: async (cart, trigger) => void decided.push({ cart, trigger }),
+      pageType: () => inspectAmazonPage(document, url).pageType,
+    });
+    const stop = watchMiniCart(document, () => readAmazonMiniCart(document, url).draft, {
+      onChange: (before, after, diff) => void handler.onChange(before, after, diff),
+    });
+    const flush = async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(MINI_CART_DEBOUNCE_MS);
+      await vi.runAllTimersAsync();
+    };
+    const line = (asin: string) => document.querySelector(`#nav-flyout-ewc .ewc-item[data-asin="${asin}"]`)!;
+    const setSubtotal = (text: string) => {
+      document.querySelector("#nav-flyout-ewc .ewc-subtotal-amount h2")!.textContent = text;
+    };
+    return { memory, events, decided, stop, flush, line, setSubtotal };
+  }
+
+  it("links a sidebar removal to the earlier decision about that item", async () => {
+    const s = await setupSidebar();
+    // The keyboard was decided on earlier (e.g. at its add to cart, on another page).
+    await s.memory.remember("11111111-1111-4111-8111-111111111111", [{ name: "Wireless keyboard, full size", price_minor: 3999 }]);
+
+    const removed = s.line("B0TEST0008");
+    removed.querySelector(".ewc-item-remove-msg")!.classList.remove("aok-hidden");
+    removed.querySelector(".ewc-item-content")?.remove();
+    removed.querySelector(".ewc-qty-and-action-items")?.remove();
+    s.setSubtotal("$29.97");
+    await s.flush();
+
+    expect(s.events).toHaveLength(1);
+    expect(s.events[0]).toMatchObject({
+      decision_id: "11111111-1111-4111-8111-111111111111",
+      action: "removed",
+      metadata: { removed: [{ name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 }], source: "mini_cart", page_type: "product" },
+    });
+    expect(s.decided).toEqual([]);
+    s.stop();
+    vi.useRealTimers();
+  });
+
+  it("asks for a fresh add-to-cart decision when the sidebar quantity goes up", async () => {
+    const s = await setupSidebar();
+    const mugs = document.querySelector('#nav-flyout-ewc .ewc-item[data-price="9.99"]') ?? s.line("B0TEST0006");
+    mugs.setAttribute("data-quantity", "4");
+    s.setSubtotal("$79.95");
+    await s.flush();
+
+    expect(s.decided).toHaveLength(1);
+    expect(s.decided[0]!.trigger).toMatchObject({ intent: "add_to_cart", source: "page", page_type: "product" });
+    expect(s.decided[0]!.cart).toMatchObject({ items: [{ name: "Ceramic coffee mug, 12 oz, matte black", price_minor: 999, qty: 1 }], total_minor: 999 });
+    s.stop();
+    vi.useRealTimers();
+  });
+});

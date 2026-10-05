@@ -1,4 +1,4 @@
-import type { DecisionEvent, Trigger, UserAction, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, Trigger, UserAction, Verdict } from "@auxo/shared";
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import {
@@ -7,7 +7,7 @@ import {
 } from "wxt/utils/content-script-ui/shadow-root";
 
 import { buildExitEvent } from "../src/api/events";
-import { hashCart, inspectAmazonPage } from "../src/cart";
+import { hashCart, inspectAmazonPage, readAmazonMiniCart } from "../src/cart";
 import { classifyClick, classifySubmit } from "../src/clicks";
 import { createDebugPanel, type BackendStatus, type DebugPanel } from "../src/debug/panel";
 import { CONTENT_TIMEOUT_MS, createCartFlow, type CartFlowOutcome } from "../src/flow";
@@ -16,15 +16,20 @@ import type {
   ClaimMessage,
   ClaimResult,
   ClickSignal,
+  CartDraft,
   DecideMessage,
   DecideResult,
+  DecisionForMessage,
+  DecisionForResult,
   EventMessage,
   EventResult,
   ExitAction,
 } from "../src/messages";
 import { renderOverlay, type OverlayHandle } from "../src/overlay";
 import { listenForBuyIntents } from "../src/tracking/listener";
+import { createMiniCartHandler } from "../src/tracking/minicart-handler";
 import { createPendingStore } from "../src/tracking/pending";
+import { watchMiniCart } from "../src/tracking/sidesheet";
 import { createTracker } from "../src/tracking/tracker";
 import { watchForChanges } from "../src/watch";
 
@@ -140,12 +145,14 @@ export default defineContentScript({
           cartHash = outcome.cartHash; // keep showing the last answer
           break;
         case "failed_open":
+          if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
           console.info("[Auxo] failed open:", outcome.reason);
           backend = { status: "failed", reason: outcome.reason };
           cartHash = outcome.cartHash;
           trigger = outcome.trigger;
           break;
         case "shown":
+          if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
           backend = {
             status: "verdict",
             lane: outcome.verdict.lane,
@@ -158,20 +165,53 @@ export default defineContentScript({
       }
     };
 
+    const requestVerdict = async (cart: Cart, t: Trigger): Promise<DecideResult> => {
+      const result = await browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart, trigger: t });
+      // This page got its answer, so the worker shouldn't hand it to the next page.
+      if (result.ok) {
+        void browser.runtime
+          .sendMessage<AckMessage>({ type: "auxo:ack", decisionId: result.verdict.decision_id })
+          .catch(() => {});
+      }
+      return result;
+    };
+
     const flow = createCartFlow({
       inspect: () => inspectAmazonPage(document, new URL(location.href)),
       hash: hashCart,
-      requestVerdict: async (cart, t) => {
-        const result = await browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart, trigger: t });
-        // This page got its answer, so the worker shouldn't hand it to the next page.
-        if (result.ok) {
-          void browser.runtime
-            .sendMessage<AckMessage>({ type: "auxo:ack", decisionId: result.verdict.decision_id })
-            .catch(() => {});
-        }
-        return result;
-      },
+      requestVerdict,
       show: (verdict) => void show(verdict),
+    });
+
+    // The cart sidebar on product pages: removals are linked to the decision
+    // about the item; + adds get a fresh decision.
+    const miniCart = createMiniCartHandler({
+      decisionFor: async (items) => {
+        const message: DecisionForMessage = {
+          type: "auxo:decision-for",
+          items: items.map(({ name, price_minor }) => ({ name, price_minor })),
+        };
+        const result = await browser.runtime
+          .sendMessage<DecisionForMessage, DecisionForResult>(message)
+          .catch(() => null);
+        return result?.decisionId ?? null;
+      },
+      sendEvent,
+      decideAdded: async (draft: CartDraft, t: Trigger) => {
+        const cartHash = await hashCart(draft);
+        const result = await Promise.race([
+          requestVerdict({ ...draft, cart_hash: cartHash }, t).catch((): DecideResult => ({ ok: false, reason: "network" })),
+          new Promise<DecideResult>((resolve) => setTimeout(() => resolve({ ok: false, reason: "timeout" }), CONTENT_TIMEOUT_MS)),
+        ]);
+        record(
+          result.ok
+            ? { status: "shown", pageType: t.page_type, draft, cartHash, trigger: t, verdict: result.verdict }
+            : { status: "failed_open", pageType: t.page_type, draft, cartHash, trigger: t, reason: result.reason },
+        );
+        refreshDebug();
+        if (result.ok) void show(result.verdict);
+      },
+      pageType: () => inspectAmazonPage(document, new URL(location.href)).pageType,
     });
 
     const tracker = createTracker({
@@ -222,6 +262,15 @@ export default defineContentScript({
       debounceMs: RECHECK_DEBOUNCE_MS,
       ignore: () => [ui?.shadowHost, debugUi?.shadowHost],
     });
+    // The cart and checkout pages track removals themselves (the tracker), so
+    // the sidebar is only watched elsewhere, to avoid counting a removal twice.
+    const loadedAs = inspectAmazonPage(document, new URL(location.href)).pageType;
+    const stopMiniCart =
+      loadedAs === "cart" || loadedAs === "checkout"
+        ? () => {}
+        : watchMiniCart(document, () => readAmazonMiniCart(document, new URL(location.href)).draft, {
+            onChange: (before, after, diff) => void miniCart.onChange(before, after, diff),
+          });
     const stopListening = listenForBuyIntents(document, { classifyClick, classifySubmit }, (signal) => {
       if (ctx.isInvalid) return;
       void tracker.onBuyIntent(signal);
@@ -229,6 +278,7 @@ export default defineContentScript({
 
     ctx.onInvalidated(() => {
       stopWatching();
+      stopMiniCart();
       stopListening();
       removeOverlay();
       debugUi?.remove();
