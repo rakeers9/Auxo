@@ -63,7 +63,7 @@ function bearerToken(request: FastifyRequest): string | null {
   return match?.[1]?.trim() || null;
 }
 
-export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
+export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 64 * 1024 });
   const corsOrigins = options.corsOrigins ?? [];
   const authRequired = options.authRequired ?? false;
@@ -95,7 +95,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const rateLimitWindowMs = options.rateLimitWindowMs ?? 60_000;
   const requestWindows = new Map<string, { startedAt: number; count: number }>();
 
-  await app.register(cors, {
+  void app.register(cors, {
     origin: corsOrigins.length === 0 ? true : corsOrigins,
   });
 

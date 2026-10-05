@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "/api/router?path=/health"
+    },
+    {
+      "source": "/v1/:path*",
+      "destination": "/api/router?path=/v1/:path*"
+    }
+  ]
+}

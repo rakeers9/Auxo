@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DecideResponseSchema } from "@auxo/shared";
 
-import { buildApp } from "./app.js";
+import { buildApp } from "./application.js";
 import type { AuthService } from "./auth/auth-service.js";
 
 const openApps: Awaited<ReturnType<typeof buildApp>>[] = [];

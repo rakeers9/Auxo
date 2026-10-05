@@ -27,7 +27,7 @@ function deterministicUuid(cartHash: string, userId: string): string {
 
 export function createStubVerdict(cart: Cart, userId: string): Verdict {
   const normalizedHash = cart.cart_hash.replace(/^sha256:/i, "");
-  const finalNibble = Number.parseInt(normalizedHash.at(-1) ?? "0", 16);
+  const finalNibble = Number.parseInt(normalizedHash[normalizedHash.length - 1] ?? "0", 16);
   const lane = LANES[finalNibble % LANES.length] ?? "L1";
   const policy = LANE_POLICY[lane];
 
