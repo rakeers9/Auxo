@@ -13,7 +13,7 @@ export interface CartFlowDeps {
   inspect(): PageInspection | Promise<PageInspection>;
   hash(draft: CartDraft): Promise<string>;
   requestVerdict(cart: Cart, trigger: Trigger): Promise<DecideResult>;
-  show(verdict: Verdict): void;
+  show(verdict: Verdict, trigger: Trigger): void;
   now?: () => Date;
   timeoutMs?: number;
 }
@@ -72,6 +72,9 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
 
       const draft = inspection.draft;
       if (!draft) return { status: "unreadable", pageType, problems: inspection.problems };
+      // A verifiably empty cart (e.g. after deleting the last item) has
+      // nothing to decide about; removals are reported by the tracker.
+      if (draft.items.length === 0) return { status: "unreadable", pageType, problems: ["the cart is empty"] };
 
       const cartHash = await deps.hash(draft);
       if (!click && cartHash === lastHash) return { status: "unchanged", pageType, draft, cartHash };
@@ -94,7 +97,7 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
       if (!result.ok) return { status: "failed_open", pageType, draft, cartHash, trigger, reason: result.reason };
 
       last = { decisionId: result.verdict.decision_id, draft, cartHash, pageType };
-      deps.show(result.verdict);
+      deps.show(result.verdict, trigger);
       return { status: "shown", pageType, draft, cartHash, trigger, verdict: result.verdict };
     },
   };

@@ -1,4 +1,4 @@
-import type { DecisionEvent, Trigger, TriggerPageType } from "@auxo/shared";
+import type { DecisionEvent, Trigger, TriggerIntent, TriggerPageType } from "@auxo/shared";
 
 import type { CartDraft, ClickSignal, PageType } from "../messages";
 import { buildDecisionEvent } from "./events";
@@ -9,8 +9,10 @@ export interface MiniCartHandlerDeps {
   // The most recent decision that covered any of these items (worker memory).
   decisionFor(items: RemovedItem[]): Promise<string | null>;
   sendEvent(event: DecisionEvent): void;
-  // Ask the backend about items added from the sidebar, and show the answer.
-  decideAdded(draft: CartDraft, trigger: Trigger): Promise<void>;
+  // Ask the backend about a cart edit. `draft` holds the items the edit was
+  // about (what was added, or what was taken out); the caller decides whether
+  // to show the answer (never for edits that lower spending).
+  decide(draft: CartDraft, trigger: Trigger): Promise<void>;
   pageType(): PageType;
   now?: () => Date;
   // What happened with each change, for the debug panel.
@@ -20,36 +22,65 @@ export interface MiniCartHandlerDeps {
 export interface SidebarReport {
   removed: RemovedItem[];
   added: RemovedItem[];
-  // For removals: the decision it was linked to, or null if no remembered
-  // decision covered those items (then nothing is sent).
+  // For removals: the earlier decision the removal was also linked to (a
+  // "removed" event), or null if none covered those items.
   linkedDecision: string | null;
-  // Added items asked about as a new add to cart (after subtracting a
-  // clicked add that was already decided).
+  // Added items asked about (after subtracting a clicked add that was
+  // already decided at the click).
   askedAbout: RemovedItem[];
+  // The click each part was credited to, if any.
+  removeIntent: TriggerIntent | null;
+  addIntent: TriggerIntent | null;
 }
 
 export interface MiniCartHandler {
   // An add-to-cart click on this page was already decided: don't count the
   // same item showing up in the sidebar as a second add.
   noteClickedAdd(draft: CartDraft): void;
-  // An add-to-cart click whose items weren't read at the click (e.g. Shopify,
-  // where the add shows up in /cart.js): the next added items are credited
-  // to it in the trigger.
-  noteAddClick(signal: ClickSignal): void;
+  // A click whose effect shows up as a cart change (add to cart where the
+  // items weren't read at the click, +, −, delete, save for later): the next
+  // matching change is credited to it in the trigger.
+  noteEditClick(signal: ClickSignal): void;
   onChange(before: CartDraft, after: CartDraft, diff: MiniCartDiff): Promise<void>;
 }
 
-// What to do when the cart sidebar changes:
-// - removed: a "removed" event against the decision about that item.
-// - added (e.g. the + stepper): a fresh decision, like an add to cart.
+const ADDING = new Set<TriggerIntent>(["add_to_cart", "increase_qty"]);
+const REDUCING = new Set<TriggerIntent>(["decrease_qty", "remove_item", "save_for_later"]);
+
+// Every cart sidebar change goes to the backend (Sreekar: don't miss any):
+// - items taken out (−, delete, save for later): a decision request about the
+//   removed items, plus a "removed" event against the earlier decision that
+//   covered them, if there was one.
+// - items added (+, add to cart): a decision request about the added items,
+//   minus anything already decided at an add-to-cart click.
+// The click that caused the change labels the trigger (source "known"/"guess");
+// without one, the change itself is the trigger (source "page").
 export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandler {
   const now = deps.now ?? (() => new Date());
   let clicked: RemovedItem[] = [];
   let addClick: ClickSignal | null = null;
+  let removeClick: ClickSignal | null = null;
+
+  const triggerFor = (click: ClickSignal | null, fallback: TriggerIntent): Trigger => ({
+    intent: click?.intent ?? fallback,
+    source: click?.source ?? "page",
+    page_type: triggerPageType(deps.pageType()),
+    occurred_at: now().toISOString(),
+    ...(click?.label ? { label: click.label } : {}),
+  });
+
+  const draftOf = (items: RemovedItem[], cart: CartDraft): CartDraft => ({
+    merchant: cart.merchant,
+    items: items.map((item) => ({ ...item })),
+    total_minor: items.reduce((sum, item) => sum + item.price_minor * item.qty, 0),
+    currency: cart.currency,
+    url: cart.url,
+  });
 
   return {
-    noteAddClick(signal) {
-      addClick = signal;
+    noteEditClick(signal) {
+      if (ADDING.has(signal.intent)) addClick = signal;
+      if (REDUCING.has(signal.intent)) removeClick = signal;
     },
 
     noteClickedAdd(draft) {
@@ -60,14 +91,13 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
 
     async onChange(before, after, diff) {
       let linkedDecision: string | null = null;
+      let removeIntent: TriggerIntent | null = null;
       if (diff.removed.length > 0) {
-        const decisionId = await deps.decisionFor(diff.removed);
-        linkedDecision = decisionId;
-        // No decision ever covered these items: nothing to attribute the removal to.
-        if (decisionId) {
+        linkedDecision = await deps.decisionFor(diff.removed);
+        if (linkedDecision) {
           deps.sendEvent(
             buildDecisionEvent(
-              decisionId,
+              linkedDecision,
               "removed",
               {
                 removed: diff.removed.map((item) => ({ ...item })),
@@ -81,29 +111,25 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
             ),
           );
         }
+        // Gone entirely vs. a lower quantity, when no click says which.
+        const goneEntirely = diff.removed.every((r) => !after.items.some((i) => i.name === r.name && i.price_minor === r.price_minor));
+        const trigger = triggerFor(removeClick, goneEntirely ? "remove_item" : "decrease_qty");
+        removeClick = null;
+        removeIntent = trigger.intent;
+        await deps.decide(draftOf(diff.removed, before), trigger);
       }
 
       const { remaining, unused } = subtract(diff.added, clicked);
       clicked = unused;
-      deps.report?.({ removed: diff.removed, added: diff.added, linkedDecision, askedAbout: remaining });
-      if (remaining.length === 0) return;
+      let addIntent: TriggerIntent | null = null;
+      if (remaining.length > 0) {
+        const trigger = triggerFor(addClick, "add_to_cart");
+        addClick = null;
+        addIntent = trigger.intent;
+        await deps.decide(draftOf(remaining, after), trigger);
+      }
 
-      const draft: CartDraft = {
-        merchant: after.merchant,
-        items: remaining.map((item) => ({ ...item })),
-        total_minor: remaining.reduce((sum, item) => sum + item.price_minor * item.qty, 0),
-        currency: after.currency,
-        url: after.url,
-      };
-      const click = addClick;
-      addClick = null;
-      await deps.decideAdded(draft, {
-        intent: "add_to_cart",
-        source: click?.source ?? "page",
-        page_type: triggerPageType(deps.pageType()),
-        occurred_at: now().toISOString(),
-        ...(click?.label ? { label: click.label } : {}),
-      });
+      deps.report?.({ removed: diff.removed, added: diff.added, linkedDecision, askedAbout: remaining, removeIntent, addIntent });
     },
   };
 }

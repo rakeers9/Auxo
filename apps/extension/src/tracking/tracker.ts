@@ -6,6 +6,8 @@ import { buildDecisionEvent } from "./events";
 import type { PendingClick, PendingStore } from "./pending";
 import { removedItems } from "./removal";
 
+const CART_EDITS = new Set<ClickSignal["intent"]>(["increase_qty", "decrease_qty", "remove_item", "save_for_later"]);
+
 export type TrackerNote =
   | { kind: "click"; signal: ClickSignal; at: Date }
   | { kind: "outcome"; outcome: CartFlowOutcome }
@@ -106,6 +108,13 @@ export function createTracker(deps: TrackerDeps): Tracker {
           deps.pending.savePurchase({ decisionId: last.decisionId, draft: last.draft, at: click.at });
           note({ kind: "purchase_pending", decisionId: last.decisionId });
         }
+        return null;
+      }
+
+      // Cart edits change this page in place: the next re-check of the page
+      // (e.g. the cart page after a delete) is credited to the click.
+      if (CART_EDITS.has(signal.intent)) {
+        carried = click;
         return null;
       }
 

@@ -3,10 +3,13 @@ import type { ClickSignal } from "../messages";
 export interface BuyIntentClassifiers {
   classifyClick(target: EventTarget | null, url: URL): ClickSignal | null;
   classifySubmit(form: HTMLFormElement, submitter: Element | null, url: URL): ClickSignal | null;
+  // Quantity dropdowns change without a click.
+  classifyChange?(target: EventTarget | null, url: URL): ClickSignal | null;
 }
 
-// Clicking a submit button fires both a click and a submit; the same intent
-// within this window is one action.
+// Clicking a submit button fires both a click and the submit it causes; the
+// same intent from those two within this window is one action. Two clicks are
+// never merged (fast repeated + taps all count).
 export const DUPLICATE_WINDOW_MS = 1_000;
 
 export interface BlockOptions {
@@ -28,7 +31,7 @@ export function listenForBuyIntents(
   now: () => number = () => Date.now(),
   block?: BlockOptions,
 ): () => void {
-  let last: { intent: ClickSignal["intent"]; at: number } | null = null;
+  let last: { intent: ClickSignal["intent"]; at: number; kind: string } | null = null;
 
   // Stops the event if the gate says so. A gate error never blocks.
   const blocked = (signal: ClickSignal, event: Event): boolean => {
@@ -53,8 +56,11 @@ export function listenForBuyIntents(
     if (!signal) return;
     if (blocked(signal, event)) return;
     const at = now();
-    if (last && last.intent === signal.intent && at - last.at < DUPLICATE_WINDOW_MS) return;
-    last = { intent: signal.intent, at };
+    const kind = event.type;
+    const causedByLast =
+      last !== null && last.kind === "click" && kind === "submit" && last.intent === signal.intent && at - last.at < DUPLICATE_WINDOW_MS;
+    last = { intent: signal.intent, at, kind };
+    if (causedByLast) return;
     try {
       onSignal(signal);
     } catch {
@@ -80,10 +86,21 @@ export function listenForBuyIntents(
     }
   };
 
+  const onChange = (event: Event) => {
+    if (!classifiers.classifyChange) return;
+    try {
+      report(classifiers.classifyChange(event.target, getUrl()), event);
+    } catch {
+      // Same as above.
+    }
+  };
+
   doc.addEventListener("click", onClick, { capture: true });
   doc.addEventListener("submit", onSubmit, { capture: true });
+  doc.addEventListener("change", onChange, { capture: true });
   return () => {
     doc.removeEventListener("click", onClick, { capture: true });
     doc.removeEventListener("submit", onSubmit, { capture: true });
+    doc.removeEventListener("change", onChange, { capture: true });
   };
 }

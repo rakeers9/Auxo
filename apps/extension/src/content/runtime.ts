@@ -1,4 +1,4 @@
-import type { Cart, DecisionEvent, StoreOverrides, Trigger, UserAction, Verdict } from "@auxo/shared";
+import { REDUCING_INTENTS, type Cart, type DecisionEvent, type StoreOverrides, type Trigger, type UserAction, type Verdict } from "@auxo/shared";
 import { browser } from "wxt/browser";
 import {
   createShadowRootUi,
@@ -75,6 +75,16 @@ export interface StoreAdapter {
   // Start noticing page and cart changes; returns a function that stops.
   watch(api: WatchApi): () => void;
 }
+
+// Clicks whose effect shows up as a cart change (sidebar or /cart.js).
+const EDIT_CLICK_INTENTS = new Set<ClickSignal["intent"]>([
+  "add_to_cart",
+  "increase_qty",
+  "decrease_qty",
+  "remove_item",
+  "save_for_later",
+]);
+const REDUCING = new Set<string>(REDUCING_INTENTS);
 
 function sessionStorageOrNull(): Storage | null {
   try {
@@ -232,10 +242,12 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     hintUi = next;
   };
 
-  const show = async (verdict: Verdict) => {
+  const show = async (verdict: Verdict, trigger?: Trigger) => {
     removeOverlay();
     if (DEBUG) return; // the debug panel shows the verdict instead
     if (verdict.lane === "L0") return; // silent pass
+    // Putting things back is recorded, never paused.
+    if (trigger && REDUCING.has(trigger.intent)) return;
 
     const next = await createShadowRootUi(ctx, {
       name: "auxo-overlay",
@@ -326,7 +338,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     inspect: () => inspect(),
     hash: hashCart,
     requestVerdict,
-    show: (verdict) => void show(verdict),
+    show: (verdict, t) => void show(verdict, t),
   });
 
   // The cart sidebar on product pages: removals are linked to the decision
@@ -343,7 +355,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       return result?.decisionId ?? null;
     },
     sendEvent,
-    decideAdded: async (draft: CartDraft, t: Trigger) => {
+    decide: async (draft: CartDraft, t: Trigger) => {
       const cartHash = await hashCart(draft);
       const result = await Promise.race([
         requestVerdict({ ...draft, cart_hash: cartHash }, t).catch((): DecideResult => ({ ok: false, reason: "network" })),
@@ -355,7 +367,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
           : { status: "failed_open", pageType: t.page_type, draft, cartHash, trigger: t, reason: result.reason },
       );
       refreshDebug();
-      if (result.ok) void show(result.verdict);
+      if (result.ok) void show(result.verdict, t);
     },
     pageType: () => lastInspection.pageType,
     report: (r) => {
@@ -363,14 +375,16 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       const parts: string[] = [];
       if (r.removed.length > 0) {
         parts.push(
-          `removed ${items(r.removed)}: ${
-            r.linkedDecision ? `sent "removed" for decision ${r.linkedDecision}` : "not sent (no Auxo decision covered it)"
+          `${r.removeIntent ?? "removed"} ${items(r.removed)}: asked the backend${
+            r.linkedDecision ? `; "removed" sent for decision ${r.linkedDecision}` : ""
           }`,
         );
       }
       if (r.added.length > 0) {
         parts.push(
-          r.askedAbout.length > 0 ? `added ${items(r.added)}: asked the backend` : `added ${items(r.added)}: already decided at the click`,
+          r.askedAbout.length > 0
+            ? `${r.addIntent ?? "added"} ${items(r.askedAbout)}: asked the backend`
+            : `added ${items(r.added)}: already decided at the click`,
         );
       }
       sidebarChange = `${new Date().toLocaleTimeString()} ${parts.join("; ")}`;
@@ -439,7 +453,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     },
     (signal) => {
       if (ctx.isInvalid) return;
-      if (signal.intent === "add_to_cart") miniCart.noteAddClick(signal);
+      if (EDIT_CLICK_INTENTS.has(signal.intent)) miniCart.noteEditClick(signal);
       void tracker.onBuyIntent(signal);
     },
     undefined,

@@ -169,7 +169,7 @@ describe("cart sidebar on a real product page", () => {
     const handler = createMiniCartHandler({
       decisionFor: (items) => memory.decisionFor(items),
       sendEvent: (e) => events.push(e),
-      decideAdded: async (cart, trigger) => void decided.push({ cart, trigger }),
+      decide: async (cart, trigger) => void decided.push({ cart, trigger }),
       pageType: () => inspectAmazonPage(document, url).pageType,
     });
     const stop = watchMiniCart(document, () => readAmazonMiniCart(document, url).draft, {
@@ -210,7 +210,10 @@ describe("cart sidebar on a real product page", () => {
       action: "removed",
       metadata: { removed: [{ name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 }], source: "mini_cart", page_type: "product" },
     });
-    expect(s.decided).toEqual([]);
+    // Every removal is also asked about, as a remove_item edit.
+    expect(s.decided).toHaveLength(1);
+    expect(s.decided[0]!.trigger).toMatchObject({ intent: "remove_item", source: "page", page_type: "product" });
+    expect(s.decided[0]!.cart).toMatchObject({ items: [{ name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 }] });
     s.stop();
     vi.useRealTimers();
   });

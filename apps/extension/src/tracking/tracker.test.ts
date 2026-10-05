@@ -162,6 +162,22 @@ describe("createTracker", () => {
     resolveInspect({ pageType: "product", draft: null, problems: [] });
   });
 
+  it("credits a cart edit click to the next re-check of the same page", async () => {
+    const t = setup(cartPage([mug, lamp]));
+    await t.tracker.onLoad();
+
+    await t.tracker.onBuyIntent({ intent: "remove_item", source: "known", label: "Delete" });
+    expect(t.pending.takeClick()).toBeNull(); // not carried to another page
+
+    t.setPage(cartPage([mug]));
+    await t.tracker.onPageChange();
+    expect(t.check).toHaveBeenLastCalledWith({
+      signal: { intent: "remove_item", source: "known", label: "Delete" },
+      pageType: "cart",
+      at: NOW.toISOString(),
+    });
+  });
+
   it("does not use up the remembered click on in-page changes", async () => {
     const t = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
     await t.tracker.onBuyIntent(signal("buy_now"));

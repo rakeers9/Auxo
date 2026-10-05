@@ -36,7 +36,7 @@ const click = (intent: PendingClick["signal"]["intent"], source: "known" | "gues
 
 function deps(overrides: Partial<CartFlowDeps> = {}) {
   const requestVerdict = vi.fn<(cart: Cart, trigger: Trigger) => Promise<DecideResult>>().mockResolvedValue({ ok: true, verdict });
-  const show = vi.fn<(verdict: Verdict) => void>();
+  const show = vi.fn<(verdict: Verdict, trigger: Trigger) => void>();
   return {
     requestVerdict,
     show,
@@ -63,7 +63,7 @@ describe("createCartFlow", () => {
     const trigger = { intent: "page_view", source: "page", page_type: "cart", occurred_at: NOW.toISOString() };
     expect(outcome).toEqual({ status: "shown", pageType: "cart", draft, cartHash: HASH, trigger, verdict });
     expect(d.requestVerdict).toHaveBeenCalledWith({ ...draft, cart_hash: HASH }, trigger);
-    expect(d.show).toHaveBeenCalledWith(verdict);
+    expect(d.show).toHaveBeenCalledWith(verdict, trigger);
   });
 
   it("sends the click as the trigger when there is one", async () => {
@@ -119,6 +119,13 @@ describe("createCartFlow", () => {
       pageType: "cart",
       problems: ["could not read"],
     });
+    expect(d.requestVerdict).not.toHaveBeenCalled();
+  });
+
+  it("doesn't ask about an empty cart", async () => {
+    const d = deps({ inspect: () => page("cart", { ...draft, items: [], total_minor: 0 }) });
+
+    expect(await createCartFlow(d.deps).check()).toEqual({ status: "unreadable", pageType: "cart", problems: ["the cart is empty"] });
     expect(d.requestVerdict).not.toHaveBeenCalled();
   });
 

@@ -82,6 +82,35 @@ describe("listenForBuyIntents", () => {
     expect(onSignal).toHaveBeenCalledTimes(2);
   });
 
+  it("never merges two real clicks, so fast repeated + taps all count", () => {
+    const onSignal = vi.fn<(s: ClickSignal) => void>();
+    document.body.innerHTML = '<button id="plus">+</button>';
+    stop = listenForBuyIntents(
+      document,
+      { classifyClick: () => ({ intent: "increase_qty", source: "known" }), classifySubmit: () => null },
+      onSignal,
+      () => URL_,
+      () => 0,
+    );
+
+    for (let i = 0; i < 3; i += 1) document.getElementById("plus")!.click();
+    expect(onSignal).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports quantity dropdown changes", () => {
+    const onSignal = vi.fn<(s: ClickSignal) => void>();
+    document.body.innerHTML = '<select id="qty"><option value="1" selected>1</option><option value="2">2</option></select>';
+    const classifyChange = vi.fn(() => ({ intent: "increase_qty" as const, source: "known" as const }));
+    stop = listenForBuyIntents(document, { classifyClick: () => null, classifySubmit: () => null, classifyChange }, onSignal, () => URL_);
+
+    const select = document.getElementById("qty") as HTMLSelectElement;
+    select.value = "2";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(classifyChange).toHaveBeenCalledWith(select, URL_);
+    expect(onSignal).toHaveBeenCalledWith({ intent: "increase_qty", source: "known" });
+  });
+
   it("does not merge different intents that happen close together", () => {
     let t = 0;
     const onSignal = vi.fn<(s: ClickSignal) => void>();
