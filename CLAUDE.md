@@ -44,6 +44,11 @@ pnpm dev:api              # API on http://127.0.0.1:3001 with tsx watch
 pnpm --filter @auxo/shared build
 pnpm --filter @auxo/api exec vitest run src/app.test.ts -t "rejects an invalid cart"
 
+# local database (Supabase CLI, needs Docker running)
+supabase db start         # local Postgres on 127.0.0.1:54322, applies supabase/migrations
+supabase db reset         # wipe and re-apply all migrations
+supabase stop
+
 # extension (WXT, Chrome MV3)
 pnpm --filter @auxo/extension dev        # opens Chrome with the extension loaded
 pnpm --filter @auxo/extension build      # output in apps/extension/.output/chrome-mv3
