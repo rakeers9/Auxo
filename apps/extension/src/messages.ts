@@ -1,4 +1,4 @@
-import type { Cart, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, Verdict } from "@auxo/shared";
 
 // Content script -> background worker: ask the API for a verdict on this cart.
 export interface DecideMessage {
@@ -19,3 +19,18 @@ export type CartDraft = Omit<Cart, "cart_hash">;
 
 // What the user chose on the overlay. Matches the API's UserAction values.
 export type ExitAction = "left" | "saved" | "overrode";
+
+// Content script -> background worker: log an overlay exit to /v1/events.
+// The worker re-validates `event` against DecisionEventSchema.
+export interface EventMessage {
+  type: "auxo:event";
+  event: DecisionEvent;
+}
+
+// Background worker -> content script. Like DecideResult, failures are
+// reported, never thrown.
+export type EventFailureReason = "timeout" | "network" | "http" | "invalid_response" | "invalid_event";
+
+export type EventResult =
+  | { ok: true; duplicate: boolean }
+  | { ok: false; reason: EventFailureReason };

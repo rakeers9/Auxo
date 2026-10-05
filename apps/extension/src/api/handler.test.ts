@@ -1,8 +1,8 @@
-import type { Cart, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, Verdict } from "@auxo/shared";
 import { describe, expect, it, vi } from "vitest";
 
-import type { DecideResult } from "../messages";
-import { handleDecideMessage, isDecideMessage } from "./handler";
+import type { DecideResult, EventResult } from "../messages";
+import { handleDecideMessage, handleEventMessage, isDecideMessage, isEventMessage } from "./handler";
 
 const cart: Cart = {
   merchant: "amazon.com",
@@ -51,6 +51,62 @@ describe("handleDecideMessage", () => {
     const decide = vi.fn<(cart: Cart) => Promise<DecideResult>>().mockRejectedValue(new Error("boom"));
 
     expect(await handleDecideMessage({ type: "auxo:decide", cart }, decide)).toEqual({
+      ok: false,
+      reason: "network",
+    });
+  });
+});
+
+const event: DecisionEvent = {
+  event_id: "8a4f0c2e-1b3d-4e5f-8a9b-0c1d2e3f4a5b",
+  decision_id: "2b9ebefe-78c8-561e-9a68-da51842c65a8",
+  action: "left",
+  occurred_at: "2026-10-04T17:00:00.000Z",
+};
+
+describe("isEventMessage", () => {
+  it("recognizes only auxo:event messages", () => {
+    expect(isEventMessage({ type: "auxo:event", event })).toBe(true);
+    expect(isEventMessage({ type: "auxo:decide", cart })).toBe(false);
+    expect(isEventMessage(null)).toBe(false);
+    expect(isEventMessage("auxo:event")).toBe(false);
+  });
+
+  it("does not change what isDecideMessage accepts", () => {
+    expect(isDecideMessage({ type: "auxo:event", event })).toBe(false);
+  });
+});
+
+describe("handleEventMessage", () => {
+  it("passes a valid event to postEvent and returns its result", async () => {
+    const postEvent = vi.fn<(event: DecisionEvent) => Promise<EventResult>>().mockResolvedValue({
+      ok: true,
+      duplicate: false,
+    });
+
+    expect(await handleEventMessage({ type: "auxo:event", event }, postEvent)).toEqual({ ok: true, duplicate: false });
+    expect(postEvent).toHaveBeenCalledWith(event);
+  });
+
+  it.each([
+    ["missing fields", { decision_id: event.decision_id }],
+    ["bad action", { ...event, action: "clicked" }],
+    ["non-uuid event_id", { ...event, event_id: "1" }],
+    ["unknown field", { ...event, extra: true }],
+    ["not an object", "left"],
+  ])("rejects an invalid event (%s) without calling the API", async (_label, bad) => {
+    const postEvent = vi.fn<(event: DecisionEvent) => Promise<EventResult>>();
+
+    const result = await handleEventMessage({ type: "auxo:event", event: bad }, postEvent);
+
+    expect(result).toEqual({ ok: false, reason: "invalid_event" });
+    expect(postEvent).not.toHaveBeenCalled();
+  });
+
+  it("returns 'network' if postEvent throws", async () => {
+    const postEvent = vi.fn<(event: DecisionEvent) => Promise<EventResult>>().mockRejectedValue(new Error("boom"));
+
+    expect(await handleEventMessage({ type: "auxo:event", event }, postEvent)).toEqual({
       ok: false,
       reason: "network",
     });
