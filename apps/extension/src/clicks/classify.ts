@@ -1,6 +1,6 @@
 import type { ClickSignal } from "../messages";
 import { guessFromAction, guessIntent, isExcluded } from "./guess";
-import { matchKnown, type ClickIntent } from "./known";
+import { matchKnown, type ButtonOverrides, type ClickIntent } from "./known";
 
 // How far up from the click target to look for the control. Clicks usually
 // land on an inner span or img a few levels down.
@@ -8,13 +8,14 @@ export const MAX_DEPTH = 8;
 
 export const MAX_LABEL_LENGTH = 200;
 
-// Classifies a click. Known store buttons win over generic guesses. Pure: reads
-// the DOM, changes nothing.
-export function classifyClick(target: EventTarget | null, url: URL): ClickSignal | null {
+// Classifies a click. Known store buttons win over generic guesses. `buttons`
+// (store config for this host) overrides the bundled known selectors per
+// intent. Pure: reads the DOM, changes nothing.
+export function classifyClick(target: EventTarget | null, url: URL, buttons?: ButtonOverrides): ClickSignal | null {
   const start = toElement(target);
   if (!start) return null;
 
-  const known = matchKnown(start, url);
+  const known = matchKnown(start, url, buttons);
   if (known) return signal(known.intent, "known", labelOf(known.element));
 
   const control = findControl(start);
@@ -23,9 +24,14 @@ export function classifyClick(target: EventTarget | null, url: URL): ClickSignal
 
 // Classifies a form submit. The submitter is checked like a click; failing
 // that, the form action (or the submitter's formaction) is used.
-export function classifySubmit(form: HTMLFormElement, submitter: Element | null, url: URL): ClickSignal | null {
+export function classifySubmit(
+  form: HTMLFormElement,
+  submitter: Element | null,
+  url: URL,
+  buttons?: ButtonOverrides,
+): ClickSignal | null {
   if (submitter) {
-    const known = matchKnown(submitter, url);
+    const known = matchKnown(submitter, url, buttons);
     if (known) return signal(known.intent, "known", labelOf(known.element));
     if (labelsOf(submitter).some(isExcluded)) return null;
     const guessed = guessFromLabels(submitter);

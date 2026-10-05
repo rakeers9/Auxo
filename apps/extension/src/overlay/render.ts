@@ -2,10 +2,22 @@ import type { Verdict } from "@auxo/shared";
 
 import type { ExitAction } from "../messages";
 import { OVERLAY_CSS } from "./styles";
-import { resolveTemplate, type OverlayTemplate } from "./templates";
+import { CLICK_PAUSE_COPY, resolveTemplate, type OverlayTemplate } from "./templates";
 
 export interface OverlayHandlers {
   onExit(action: ExitAction): void;
+}
+
+export interface OverlayOptions {
+  // The label of a buy button whose click was stopped (e.g. "Place your
+  // order"). Shows the block screen, whatever the verdict's action, naming what
+  // was paused. The click is never replayed: after Continue the user clicks the
+  // real button again themselves.
+  clicked?: string;
+}
+
+export interface ClickAgainHandlers {
+  onDismiss(): void;
 }
 
 export interface OverlayHandle {
@@ -17,82 +29,133 @@ export interface OverlayHandle {
 // never shorten the cooldown.
 const TICK_MS = 250;
 
+const MAX_LABEL_LENGTH = 200;
+
 let idCounter = 0;
 
 // Renders the overlay for a verdict into `root` (a shadow root in production).
-// Returns null for L0, which shows nothing.
+// Returns null for L0, which shows nothing, unless a click was stopped.
 export function renderOverlay(
   root: ShadowRoot | HTMLElement,
   verdict: Verdict,
   handlers: OverlayHandlers,
+  options: OverlayOptions = {},
 ): OverlayHandle | null {
   const template = resolveTemplate(verdict);
-  if (template.kind === "none") return null;
+  const clicked = options.clicked === undefined ? undefined : cleanLabel(options.clicked);
+  if (clicked === undefined && template.kind === "none") return null;
 
+  const dataset: Record<string, string> = { lane: template.lane, template: template.id };
+  if (clicked !== undefined) dataset.clicked = clicked;
+
+  return mount(root, dataset, (ctx) => {
+    if (clicked !== undefined) {
+      // A non-block lane has no block copy of its own; an empty one (L0) borrows a generic line.
+      const copy = template.title ? template : { ...template, ...CLICK_PAUSE_COPY };
+      renderBlock({ ...ctx, template: copy, handlers }, verdict.cooldown_seconds, clicked);
+    } else if (template.kind === "banner") renderBanner({ ...ctx, template, handlers });
+    else if (template.kind === "pause") renderPause({ ...ctx, template, handlers }, verdict.cooldown_seconds);
+    else renderBlock({ ...ctx, template, handlers }, verdict.cooldown_seconds);
+  });
+}
+
+// A small non-modal banner shown after Continue on a stopped click, telling the
+// user they can click the real button now. Dismissible by button or Escape;
+// never traps focus. Dismissing removes it and calls onDismiss.
+export function renderClickAgainHint(
+  root: ShadowRoot | HTMLElement,
+  label: string,
+  handlers: ClickAgainHandlers,
+): OverlayHandle {
+  const clean = cleanLabel(label);
+  return mount(root, { hint: "click-again" }, (ctx) => {
+    const text = clean ? `You can click “${clean}” now.` : "You can click it now.";
+    showBanner(ctx, [el(ctx.doc, "p", "auxo-body", text)], () => {
+      ctx.destroy();
+      handlers.onDismiss();
+    });
+  });
+}
+
+// What every overlay piece gets while it builds.
+interface MountContext {
+  doc: Document;
+  container: HTMLElement;
+  stops: Array<() => void>;
+  destroy(): void;
+}
+
+interface View extends MountContext {
+  template: OverlayTemplate;
+  handlers: OverlayHandlers;
+}
+
+// Adds a <style> and a container to `root`, lets `build` fill the container,
+// focuses any [data-autofocus], and returns a handle whose destroy() runs every
+// cleanup and removes both nodes.
+function mount(
+  root: ShadowRoot | HTMLElement,
+  dataset: Record<string, string>,
+  build: (ctx: MountContext) => void,
+): OverlayHandle {
   const doc = root.ownerDocument ?? document;
   const style = doc.createElement("style");
   style.textContent = OVERLAY_CSS;
   const container = doc.createElement("div");
   container.className = "auxo-overlay";
-  container.dataset.lane = template.lane;
-  container.dataset.template = template.id;
+  Object.assign(container.dataset, dataset);
 
   const stops: Array<() => void> = [];
-  const view: View = { doc, container, template, handlers, stops };
+  let destroyed = false;
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    for (const stop of stops) stop();
+    style.remove();
+    container.remove();
+  };
 
-  if (template.kind === "banner") renderBanner(view);
-  else if (template.kind === "pause") renderPause(view, verdict.cooldown_seconds);
-  else renderBlock(view, verdict.cooldown_seconds);
-
+  build({ doc, container, stops, destroy });
   root.append(style, container);
   container.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-
-  let destroyed = false;
-  return {
-    destroy() {
-      if (destroyed) return;
-      destroyed = true;
-      for (const stop of stops) stop();
-      style.remove();
-      container.remove();
-    },
-  };
-}
-
-interface View {
-  doc: Document;
-  container: HTMLElement;
-  template: OverlayTemplate;
-  handlers: OverlayHandlers;
-  stops: Array<() => void>;
+  return { destroy };
 }
 
 // L1: a small banner. Dismissing it (button or Escape) is not an exit, so onExit
 // is never called.
-function renderBanner({ doc, container, template, stops }: View): void {
-  const banner = el(doc, "div", "auxo-banner");
-  banner.setAttribute("role", "status");
-
+function renderBanner(view: View): void {
+  const { doc, template } = view;
   const text = el(doc, "div");
   text.append(el(doc, "p", "auxo-title", template.title), el(doc, "p", "auxo-body", template.body));
+  showBanner(view, [text], () => {});
+}
+
+// A non-modal banner with a dismiss button. The banner is removed on dismiss,
+// then `onDismiss` runs, once. Focus is usually on the page, so Escape is heard
+// at the document but not swallowed: the page's own Escape handling still runs.
+function showBanner({ doc, container, stops }: MountContext, content: HTMLElement[], onDismiss: () => void): void {
+  const banner = el(doc, "div", "auxo-banner");
+  banner.setAttribute("role", "status");
 
   const dismiss = button(doc, "×", "dismiss", "auxo-dismiss");
   dismiss.setAttribute("aria-label", "Dismiss");
 
-  // The banner is non-modal, so focus is usually on the page. Escape is heard at
-  // the document but not swallowed, so the page's own Escape handling still runs.
+  let dismissed = false;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") dismissBanner();
   };
   const dismissBanner = () => {
+    if (dismissed) return;
+    dismissed = true;
     banner.remove();
     doc.removeEventListener("keydown", onKeyDown);
+    onDismiss();
   };
   dismiss.addEventListener("click", dismissBanner);
   doc.addEventListener("keydown", onKeyDown);
   stops.push(() => doc.removeEventListener("keydown", onKeyDown));
 
-  banner.append(text, dismiss);
+  banner.append(...content, dismiss);
   container.append(banner);
 }
 
@@ -112,28 +175,32 @@ function renderPause(view: View, cooldownSeconds: number): void {
   dialog.dataset.autofocus = "";
 }
 
-// L3/L4: a full block with three exits. Go anyway unlocks when the cooldown ends.
-function renderBlock(view: View, cooldownSeconds: number): void {
+// L3/L4, or any lane when a click was stopped: a full block with three exits.
+// Go anyway (Continue, for a stopped click) unlocks when the cooldown ends.
+function renderBlock(view: View, cooldownSeconds: number, clicked?: string): void {
   const { doc, stops } = view;
-  const { countdown, actions } = dialogShell(view);
+  const stopped =
+    clicked === undefined ? undefined : clicked ? `We paused “${clicked}”.` : "We paused that click.";
+  const { countdown, actions } = dialogShell(view, stopped);
   const exit = exitOnce(view, actions);
 
+  const goLabel = clicked === undefined ? "Go anyway" : "Continue";
   const leave = button(doc, "Leave", "leave", "auxo-button-primary");
   leave.addEventListener("click", () => exit("left"));
   const save = button(doc, "Save for later", "save");
   save.addEventListener("click", () => exit("saved"));
-  const goAnyway = button(doc, "Go anyway", "go-anyway");
+  const goAnyway = button(doc, goLabel, "go-anyway");
   goAnyway.addEventListener("click", () => exit("overrode"));
   actions.append(leave, save, goAnyway);
 
-  stops.push(
-    startCooldown(cooldownSeconds, goAnyway, countdown, (s) => `Go anyway unlocks in ${formatSeconds(s)}`, "You can go ahead if you still want to."),
-  );
+  const done = clicked === undefined ? "You can go ahead if you still want to." : "You can continue now.";
+  stops.push(startCooldown(cooldownSeconds, goAnyway, countdown, (s) => `${goLabel} unlocks in ${formatSeconds(s)}`, done));
   leave.dataset.autofocus = "";
 }
 
-// Backdrop + modal dialog with title, body, countdown line, and an actions row.
-function dialogShell(view: View) {
+// Backdrop + modal dialog with title, an optional "what was stopped" line,
+// body, countdown line, and an actions row.
+function dialogShell(view: View, stoppedText?: string) {
   const { doc, container, template } = view;
   const id = `auxo-${++idCounter}`;
   const backdrop = el(doc, "div", "auxo-backdrop");
@@ -141,7 +208,7 @@ function dialogShell(view: View) {
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   dialog.setAttribute("aria-labelledby", `${id}-title`);
-  dialog.setAttribute("aria-describedby", `${id}-body`);
+  dialog.setAttribute("aria-describedby", stoppedText === undefined ? `${id}-body` : `${id}-stopped ${id}-body`);
   dialog.tabIndex = -1;
 
   const title = el(doc, "h2", "auxo-title", template.title);
@@ -152,7 +219,14 @@ function dialogShell(view: View) {
   countdown.dataset.role = "countdown";
   const actions = el(doc, "div", "auxo-actions");
 
-  dialog.append(title, body, countdown, actions);
+  if (stoppedText === undefined) {
+    dialog.append(title, body, countdown, actions);
+  } else {
+    const stopped = el(doc, "p", "auxo-stopped", stoppedText);
+    stopped.id = `${id}-stopped`;
+    stopped.dataset.role = "stopped";
+    dialog.append(title, stopped, body, countdown, actions);
+  }
   backdrop.append(dialog);
   container.append(backdrop);
   trapFocus(view, dialog);
@@ -233,6 +307,11 @@ function startCooldown(
     line.textContent = done;
   }, TICK_MS);
   return () => clearInterval(timer);
+}
+
+// Labels come from the page: collapse whitespace, trim, and cap the length.
+function cleanLabel(label: string): string {
+  return label.replace(/\s+/g, " ").trim().slice(0, MAX_LABEL_LENGTH).trim();
 }
 
 export function formatSeconds(total: number): string {
