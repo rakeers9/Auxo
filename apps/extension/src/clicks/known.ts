@@ -40,13 +40,49 @@ export const KNOWN_CONTROLS: Record<string, KnownControl[]> = {
   ],
 };
 
-// The known control `start` sits in, if any, for this host.
-export function matchKnown(start: Element, url: URL): { intent: ClickIntent; element: Element } | null {
-  const controls = KNOWN_CONTROLS[url.hostname];
-  if (!controls) return null;
-  for (const control of controls) {
+// Per-intent selector lists from store config (StoreOverrides.buttons). A
+// given intent's list replaces the bundled list for that intent.
+export type ButtonOverrides = Partial<Record<ClickIntent, string[]>>;
+
+const CLICK_INTENTS: readonly ClickIntent[] = ["add_to_cart", "buy_now", "view_cart", "checkout", "place_order"];
+
+// The known controls for a host: bundled defaults with any overrides applied.
+// Intents not overridden keep their defaults; overridden intents the host has
+// no default for are added after the defaults.
+export function controlsFor(host: string, buttons?: ButtonOverrides): KnownControl[] {
+  const defaults = KNOWN_CONTROLS[host] ?? [];
+  if (!buttons) return defaults;
+
+  const override = (intent: ClickIntent): string[] | undefined => {
+    const list = buttons[intent];
+    return Array.isArray(list) ? list : undefined;
+  };
+  const merged = defaults.map((control) => {
+    const selectors = override(control.intent);
+    return selectors ? { intent: control.intent, selectors } : control;
+  });
+  for (const intent of CLICK_INTENTS) {
+    const selectors = override(intent);
+    if (selectors && !defaults.some((control) => control.intent === intent)) merged.push({ intent, selectors });
+  }
+  return merged;
+}
+
+// The known control `start` sits in, if any, for this host. A selector that
+// closest() rejects (config is data from the server) is skipped.
+export function matchKnown(
+  start: Element,
+  url: URL,
+  buttons?: ButtonOverrides,
+): { intent: ClickIntent; element: Element } | null {
+  for (const control of controlsFor(url.hostname, buttons)) {
     for (const selector of control.selectors) {
-      const element = start.closest(selector);
+      let element: Element | null;
+      try {
+        element = start.closest(selector);
+      } catch {
+        continue;
+      }
       if (element) return { intent: control.intent, element };
     }
   }
