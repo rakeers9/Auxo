@@ -212,7 +212,7 @@ describe("inspectAmazonPage on other pages", () => {
     expect(inspectAmazonPage(parse(productHtml), new URL("https://www.amazon.com/s?k=lamp"))).toEqual({
       pageType: "other",
       draft: null,
-      problems: ["not a product, cart, or checkout page"],
+      problems: ["not a product, added-to-cart, cart, or checkout page"],
     });
   });
 

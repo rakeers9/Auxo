@@ -1,4 +1,5 @@
 import type { PageInspection } from "../messages";
+import { isAmazonAddedToCartPage, readAmazonAddedToCart } from "./added";
 import { isAmazonCartPage, isAmazonHost, readAmazonCart } from "./amazon";
 import { isAmazonCheckoutPage, readAmazonCheckout } from "./checkout";
 import { isAmazonProductPage, readAmazonProduct } from "./product";
@@ -10,9 +11,10 @@ export function inspectAmazonPage(doc: Document, url: URL): PageInspection {
   if (isAmazonCartPage(url, doc)) return { pageType: "cart", ...readAmazonCart(doc, url) };
   if (isAmazonCheckoutPage(url, doc)) return { pageType: "checkout", ...readAmazonCheckout(doc, url) };
   if (isAmazonProductPage(url, doc)) return { pageType: "product", ...readAmazonProduct(doc, url) };
+  if (isAmazonAddedToCartPage(url, doc)) return { pageType: "added_to_cart", ...readAmazonAddedToCart(doc, url) };
 
   const problems = isAmazonHost(url)
-    ? ["not a product, cart, or checkout page"]
+    ? ["not a product, added-to-cart, cart, or checkout page"]
     : [`not on https://www.amazon.com (this is ${url.protocol}//${url.hostname})`];
   return { pageType: "other", draft: null, problems };
 }

@@ -1,4 +1,6 @@
+export { extractAmazonAddedToCart, isAmazonAddedToCartPage } from "./added";
 export { extractAmazonCart, isAmazonCartPage } from "./amazon";
+export { readAmazonMiniCart } from "./minicart";
 export { extractAmazonCheckout, isAmazonCheckoutPage } from "./checkout";
 export { hashCart } from "./hash";
 export { extractAmazonProduct, isAmazonProductPage } from "./product";

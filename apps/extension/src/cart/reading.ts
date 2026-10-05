@@ -26,12 +26,13 @@ export function finishReading(
   total: number | null,
   problems: string[],
   details: Record<string, string>,
+  totalLabel = "Amazon's total",
 ): Reading {
   if (total !== null && items.length > 0 && problems.length === 0) {
     const sum = items.reduce((acc, item) => acc + item.price_minor * item.qty, 0);
     details["items sum"] = formatMinor(sum);
     if (!Number.isSafeInteger(sum) || sum !== total) {
-      problems.push(`items sum ${formatMinor(sum)} but Amazon's total says ${formatMinor(total)}`);
+      problems.push(`items sum ${formatMinor(sum)} but ${totalLabel} says ${formatMinor(total)}`);
     }
   }
   if (problems.length > 0 || total === null) return { draft: null, problems, details };
