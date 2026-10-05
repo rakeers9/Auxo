@@ -65,12 +65,16 @@ export default defineContentScript({
     let note: string | null = null;
     const events: Array<{ action: UserAction; decisionId: string; at: Date }> = [];
 
+    // Reader selector overrides from the backend config (set once it loads).
+    let selectorOverrides: Record<string, string> | undefined;
+    const inspect = () => inspectAmazonPage(document, new URL(location.href), selectorOverrides);
+
     const refreshDebug = () => {
       if (!debugUi?.mounted) return;
       const url = new URL(location.href);
       debugUi.mounted.update({
         url: url.href,
-        inspection: inspectAmazonPage(document, url),
+        inspection: inspectAmazonPage(document, url, selectorOverrides),
         cartHash,
         backend,
         checkedAt: new Date(),
@@ -143,6 +147,7 @@ export default defineContentScript({
         .catch(() => null),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), CONTENT_TIMEOUT_MS)),
     ]);
+    selectorOverrides = overrides?.selectors;
     if (overrides?.enabled === false) {
       note = `Auxo is switched off for ${location.hostname} by the backend config`;
       refreshDebug();
@@ -195,7 +200,7 @@ export default defineContentScript({
     };
 
     const flow = createCartFlow({
-      inspect: () => inspectAmazonPage(document, new URL(location.href)),
+      inspect: () => inspect(),
       hash: hashCart,
       requestVerdict,
       show: (verdict) => void show(verdict),
@@ -229,13 +234,13 @@ export default defineContentScript({
         refreshDebug();
         if (result.ok) void show(result.verdict);
       },
-      pageType: () => inspectAmazonPage(document, new URL(location.href)).pageType,
+      pageType: () => inspect().pageType,
     });
 
     const tracker = createTracker({
       flow,
       pending: createPendingStore(sessionStorageOrNull()),
-      inspect: () => inspectAmazonPage(document, new URL(location.href)),
+      inspect: () => inspect(),
       sendEvent,
       note: (n) => {
         if (n.kind === "click") lastClick = { signal: n.signal, at: n.at };
@@ -282,11 +287,11 @@ export default defineContentScript({
     });
     // The cart and checkout pages track removals themselves (the tracker), so
     // the sidebar is only watched elsewhere, to avoid counting a removal twice.
-    const loadedAs = inspectAmazonPage(document, new URL(location.href)).pageType;
+    const loadedAs = inspect().pageType;
     const stopMiniCart =
       loadedAs === "cart" || loadedAs === "checkout"
         ? () => {}
-        : watchMiniCart(document, () => readAmazonMiniCart(document, new URL(location.href)).draft, {
+        : watchMiniCart(document, () => readAmazonMiniCart(document, new URL(location.href), selectorOverrides).draft, {
             onChange: (before, after, diff) => void miniCart.onChange(before, after, diff),
           });
     const stopListening = listenForBuyIntents(document, { classifyClick, classifySubmit }, (signal) => {
