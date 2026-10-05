@@ -95,3 +95,10 @@ export interface ConfigMessage {
 export interface ConfigResult {
   overrides: StoreOverrides | null;
 }
+
+// Content script -> worker: the user chose "Save for later" on this decision.
+// The worker puts the decision's items on the wishlist (src/wishlist).
+export interface WishlistSaveMessage {
+  type: "auxo:wishlist-save";
+  decisionId: string;
+}

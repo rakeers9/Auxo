@@ -92,3 +92,12 @@ export function isConfigMessage(message: unknown): message is { type: "auxo:conf
     typeof (message as { host?: unknown }).host === "string"
   );
 }
+
+export function isWishlistSaveMessage(message: unknown): message is { type: "auxo:wishlist-save"; decisionId: string } {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as { type?: unknown }).type === "auxo:wishlist-save" &&
+    typeof (message as { decisionId?: unknown }).decisionId === "string"
+  );
+}

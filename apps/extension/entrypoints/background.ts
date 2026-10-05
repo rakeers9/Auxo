@@ -12,12 +12,15 @@ import {
   isDecideMessage,
   isDecisionForMessage,
   isEventMessage,
+  isWishlistSaveMessage,
   triggerOf,
 } from "../src/api/handler";
-import { createDecisionMemory } from "../src/api/decision-memory";
+import { createDecisionMemory, type RememberedCart } from "../src/api/decision-memory";
 import { createHandoff } from "../src/api/handoff";
 import { createConfigCache, fetchStoreConfig, overridesFor } from "../src/api/store-config";
 import { API_BASE_URL } from "../src/config";
+import { saveDecisionToWishlist } from "../src/wishlist/save";
+import { createWishlist } from "../src/wishlist/store";
 import type { ClaimResult, ConfigResult, DecisionForResult } from "../src/messages";
 
 export default defineBackground(() => {
@@ -29,6 +32,11 @@ export default defineBackground(() => {
     set: (items) => browser.storage.session.set(items),
   });
   browser.tabs.onRemoved.addListener((tabId) => handoff.forget(tabId));
+  // "Save for later" items, shown in the toolbar popup.
+  const wishlist = createWishlist({
+    get: (key) => browser.storage.local.get(key),
+    set: (items) => browser.storage.local.set(items),
+  });
   // Store selectors and on/off switches from the backend (data, not code).
   const config = createConfigCache({
     load: () => fetchStoreConfig({ baseUrl: API_BASE_URL }),
@@ -44,7 +52,7 @@ export default defineBackground(() => {
       if (tabId !== undefined) handoff.track(tabId, triggerOf(message), result);
       void result.then((r) => {
         // r.ok means the cart passed validation in handleDecideMessage.
-        if (r.ok) void memory.remember(r.verdict.decision_id, (message.cart as { items: Array<{ name: string; price_minor: number }> }).items);
+        if (r.ok) void memory.remember(r.verdict.decision_id, message.cart as RememberedCart);
       });
       void result.then(sendResponse);
       return true; // keep the channel open for the async response
@@ -64,6 +72,10 @@ export default defineBackground(() => {
     if (isConfigMessage(message)) {
       void config.get().then((c) => sendResponse({ overrides: overridesFor(c, message.host) } satisfies ConfigResult));
       return true;
+    }
+    if (isWishlistSaveMessage(message)) {
+      void saveDecisionToWishlist(message.decisionId, memory, wishlist);
+      return;
     }
     if (isClaimMessage(message)) {
       const claimed = tabId === undefined ? Promise.resolve(null) : handoff.claim(tabId);

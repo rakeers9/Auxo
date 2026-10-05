@@ -26,6 +26,7 @@ import type {
   EventMessage,
   EventResult,
   ExitAction,
+  WishlistSaveMessage,
 } from "../src/messages";
 import { renderClickAgainHint, renderOverlay, type OverlayHandle } from "../src/overlay";
 import { createClickGate } from "../src/tracking/gate";
@@ -118,11 +119,20 @@ export default defineContentScript({
         .catch(() => console.info(`[Auxo] ${event.action} event not recorded: worker unavailable`));
     };
 
+    // "Save for later" puts the decision's items on the wishlist (the worker
+    // remembers which cart each decision was about).
+    const saveForLater = (decisionId: string) => {
+      void browser.runtime
+        .sendMessage<WishlistSaveMessage>({ type: "auxo:wishlist-save", decisionId })
+        .catch(() => console.info("[Auxo] not saved to the wishlist: worker unavailable"));
+    };
+
     // Every exit is logged (design invariant: every override is recorded).
     // Continuing past an answer also lets the user's own next clicks through.
     const onExit = (verdict: Verdict, action: ExitAction) => {
       removeOverlay();
       if (action === "overrode") gate.override(verdict.decision_id);
+      if (action === "saved") saveForLater(verdict.decision_id);
       sendEvent(buildExitEvent(verdict.decision_id, action));
     };
 
@@ -152,7 +162,10 @@ export default defineContentScript({
                   void showHint(label);
                 }
                 // The dev placeholder answer isn't a real decision.
-                if (!synthetic) sendEvent(buildExitEvent(verdict.decision_id, action));
+                if (!synthetic) {
+                  if (action === "saved") saveForLater(verdict.decision_id);
+                  sendEvent(buildExitEvent(verdict.decision_id, action));
+                }
                 note = `click on "${label}" was stopped; user chose ${action}`;
                 refreshDebug();
               },

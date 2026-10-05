@@ -11,6 +11,7 @@ import {
   isDecideMessage,
   isDecisionForMessage,
   isEventMessage,
+  isWishlistSaveMessage,
   triggerOf,
 } from "./handler";
 
@@ -177,5 +178,13 @@ describe("isConfigMessage", () => {
     expect(isConfigMessage({ type: "auxo:config", host: "www.amazon.com" })).toBe(true);
     expect(isConfigMessage({ type: "auxo:config" })).toBe(false);
     expect(isConfigMessage({ type: "auxo:claim" })).toBe(false);
+  });
+});
+
+describe("isWishlistSaveMessage", () => {
+  it("needs a decision id", () => {
+    expect(isWishlistSaveMessage({ type: "auxo:wishlist-save", decisionId: "x" })).toBe(true);
+    expect(isWishlistSaveMessage({ type: "auxo:wishlist-save" })).toBe(false);
+    expect(isWishlistSaveMessage({ type: "auxo:ack", decisionId: "x" })).toBe(false);
   });
 });

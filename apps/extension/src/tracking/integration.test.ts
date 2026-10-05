@@ -190,7 +190,12 @@ describe("cart sidebar on a real product page", () => {
   it("links a sidebar removal to the earlier decision about that item", async () => {
     const s = await setupSidebar();
     // The keyboard was decided on earlier (e.g. at its add to cart, on another page).
-    await s.memory.remember("11111111-1111-4111-8111-111111111111", [{ name: "Wireless keyboard, full size", price_minor: 3999 }]);
+    await s.memory.remember("11111111-1111-4111-8111-111111111111", {
+      merchant: "amazon.com",
+      currency: "USD",
+      url: "https://www.amazon.com/gp/cart/view.html",
+      items: [{ name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 }],
+    });
 
     const removed = s.line("B0TEST0008");
     removed.querySelector(".ewc-item-remove-msg")!.classList.remove("aok-hidden");
