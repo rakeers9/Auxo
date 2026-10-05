@@ -6,19 +6,28 @@ import {
   type ShadowRootContentScriptUi,
 } from "wxt/utils/content-script-ui/shadow-root";
 
-import { extractAmazonCart, hashCart, isAmazonCartPage } from "../src/cart";
-import { createCartFlow } from "../src/flow";
 import { buildExitEvent } from "../src/api/events";
+import { extractAmazonCart, hashCart, isAmazonCartPage } from "../src/cart";
+import { inspectPage } from "../src/debug/inspect";
+import { createDebugPanel, type BackendStatus, type DebugPanel } from "../src/debug/panel";
+import { createCartFlow } from "../src/flow";
 import type { DecideMessage, DecideResult, EventMessage, EventResult, ExitAction } from "../src/messages";
 import { renderOverlay, type OverlayHandle } from "../src/overlay";
 import { watchForChanges } from "../src/watch";
 
 const RECHECK_DEBOUNCE_MS = 500;
 
+// Dev builds (`wxt` or `wxt build --mode development`) show the always-on
+// debug panel instead of the overlay, to check what the extension reads.
+const DEBUG = import.meta.env.MODE === "development";
+
 export default defineContentScript({
   matches: ["https://www.amazon.com/*"],
   async main(ctx) {
     let ui: ShadowRootContentScriptUi<OverlayHandle | null> | null = null;
+    let debugUi: ShadowRootContentScriptUi<DebugPanel> | null = null;
+    let checks = 0;
+    let lastBackend: BackendStatus = { status: "not_asked" };
 
     const removeOverlay = () => {
       ui?.remove(); // onRemove calls destroy(), which clears timers and listeners
@@ -40,6 +49,7 @@ export default defineContentScript({
 
     const show = async (verdict: Verdict) => {
       removeOverlay();
+      if (DEBUG) return; // the debug panel shows the verdict instead
       if (verdict.lane === "L0") return; // silent pass
 
       const next = await createShadowRootUi(ctx, {
@@ -55,6 +65,31 @@ export default defineContentScript({
       ui = next;
     };
 
+    if (DEBUG) {
+      debugUi = await createShadowRootUi(ctx, {
+        name: "auxo-debug",
+        position: "inline",
+        anchor: "body",
+        onMount: (container) => createDebugPanel(container),
+        onRemove: (panel) => panel?.destroy(),
+      });
+      debugUi.mount();
+    }
+
+    const debug = (backend: BackendStatus, cartHash: string | null = null) => {
+      if (backend.status !== "pending") lastBackend = backend;
+      if (!debugUi?.mounted) return;
+      const url = new URL(location.href);
+      debugUi.mounted.update({
+        url: url.href,
+        inspection: inspectPage(document, url),
+        cartHash,
+        backend,
+        checkedAt: new Date(),
+        checks,
+      });
+    };
+
     const run = createCartFlow({
       isCartPage: () => isAmazonCartPage(new URL(location.href), document),
       extract: () => extractAmazonCart(document, new URL(location.href)),
@@ -66,19 +101,42 @@ export default defineContentScript({
 
     const check = () => {
       if (ctx.isInvalid) return;
+      checks += 1;
+      debug({ status: "pending" });
       void run().then((outcome) => {
         if (outcome.status === "failed_open") console.info("[Auxo] failed open:", outcome.reason);
+        switch (outcome.status) {
+          case "not_cart":
+          case "unreadable":
+            return debug({ status: "not_asked" });
+          case "unchanged":
+            // Same cart as the last check on this page: keep showing its answer.
+            return debug(lastBackend, outcome.cartHash);
+          case "failed_open":
+            return debug({ status: "failed", reason: outcome.reason }, outcome.cartHash);
+          case "shown":
+            return debug(
+              {
+                status: "verdict",
+                lane: outcome.verdict.lane,
+                decisionId: outcome.verdict.decision_id,
+                templateId: outcome.verdict.template_id,
+              },
+              outcome.cartHash,
+            );
+        }
       });
     };
 
     check();
     const stop = watchForChanges(document.body, check, {
       debounceMs: RECHECK_DEBOUNCE_MS,
-      ignore: () => ui?.shadowHost ?? null,
+      ignore: () => [ui?.shadowHost, debugUi?.shadowHost],
     });
     ctx.onInvalidated(() => {
       stop();
       removeOverlay();
+      debugUi?.remove();
     });
   },
 });

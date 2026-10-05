@@ -9,7 +9,8 @@
     "zip": "pnpm --filter @auxo/shared build && wxt zip",
     "test": "pnpm --filter @auxo/shared build && vitest run",
     "typecheck": "pnpm --filter @auxo/shared build && wxt prepare && tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "build:debug": "pnpm --filter @auxo/shared build && wxt build --mode development"
   },
   "dependencies": {
     "@auxo/shared": "workspace:*",

@@ -37,7 +37,7 @@ describe("watchForChanges", () => {
   it("ignores changes inside our own overlay", async () => {
     const run = vi.fn();
     const ours = document.getElementById("ours")!;
-    const stop = watchForChanges(document.body, run, { debounceMs: 500, ignore: () => ours });
+    const stop = watchForChanges(document.body, run, { debounceMs: 500, ignore: () => [null, ours] });
 
     ours.textContent = "overlay tick";
     await flush(1_000);

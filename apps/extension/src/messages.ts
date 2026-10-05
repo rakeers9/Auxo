@@ -34,3 +34,12 @@ export type EventFailureReason = "timeout" | "network" | "http" | "invalid_respo
 export type EventResult =
   | { ok: true; duplicate: boolean }
   | { ok: false; reason: EventFailureReason };
+
+// What the extension read from a page, for the dev debug panel. `problems`
+// explains in plain English why `draft` is null.
+export interface PageInspection {
+  pageType: "cart" | "checkout" | "other";
+  draft: CartDraft | null;
+  problems: string[];
+  details?: Record<string, string>;
+}

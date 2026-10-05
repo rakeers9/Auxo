@@ -52,6 +52,7 @@ supabase stop
 # extension (WXT, Chrome MV3)
 pnpm --filter @auxo/extension dev        # opens Chrome with the extension loaded
 pnpm --filter @auxo/extension build      # output in apps/extension/.output/chrome-mv3
+pnpm --filter @auxo/extension build:debug  # .output/chrome-mv3-dev: always-on debug panel, no overlay
 pnpm --filter @auxo/extension test
 pnpm --filter @auxo/extension exec vitest run src/cart
 ```
