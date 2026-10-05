@@ -19,6 +19,7 @@ Several Claude Code sessions may build in parallel. Rules:
 - **Claim files before editing.** Each session owns the directories it was assigned and touches nothing else. To change something outside your scope, message the owning session first.
 - **Contracts and dependencies are shared.** Announce any change to `packages/shared`, root config, or `package.json`/`pnpm-lock.yaml` to all sessions before making it. Only the coordinating (main) session adds dependencies, so the lockfile doesn't conflict.
 - **Integration branch.** Extension work branches from `extension` and is merged back into `extension` by the coordinating session after the suite passes. Rebase on `extension` before handing work back.
+- **Push every commit to GitHub.** After each commit or merge on `extension`, the coordinating session runs `git push origin extension` (the branch tracks `origin/extension`). Before pushing, check the new commits for secrets and personal data (the repo is public). Other sessions don't push; their work reaches GitHub when it's merged into `extension`. Never push to or merge into `main` without the user asking.
 - **Report back when done:** branch, commit hash, files changed, test counts.
 
 ## Linear
