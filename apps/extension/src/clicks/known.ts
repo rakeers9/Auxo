@@ -40,42 +40,78 @@ export const KNOWN_CONTROLS: Record<string, KnownControl[]> = {
   ],
 };
 
+// Platforms whose standard storefront markup is the same on every host.
+export type Platform = "shopify";
+
+// Platform buttons, applied on any host when the caller says the page is on
+// that platform. Same rule as KNOWN_CONTROLS: every selector must appear in a
+// real fixture (src/cart/__fixtures__/shopify/*-buttons.html), and order
+// matters: the first control whose selector matches wins.
+export const PLATFORM_CONTROLS: Record<Platform, KnownControl[]> = {
+  shopify: [
+    // Dynamic checkout ("Buy it now" / Shop Pay) on product pages: Shopify
+    // injects the real button inside this wrapper. Dawn, Horizon.
+    { intent: "buy_now", selectors: [".shopify-payment-button", "shopify-accelerated-checkout"] },
+    // The product form's submit. type="submit" leaves out Horizon's quick-add
+    // "Choose" button (type="button" name="add"), which only opens options.
+    // Dawn, Horizon, Death Wish Coffee.
+    { intent: "add_to_cart", selectors: ['form[action*="/cart/add"] [type="submit"][name="add"]'] },
+    // The cart page and cart notification checkout button, and the cart's
+    // express checkout wallets. Dawn, Horizon, Death Wish Coffee.
+    { intent: "checkout", selectors: ['button[name="checkout"]', "shopify-accelerated-checkout-cart"] },
+    // Links to Shopify's /cart route (header icon, "View cart"). Drawer themes
+    // (Horizon's product page) use a button instead, left to guesses.
+    { intent: "view_cart", selectors: ['a[href="/cart"]'] },
+  ],
+};
+
 // Per-intent selector lists from store config (StoreOverrides.buttons). A
 // given intent's list replaces the bundled list for that intent.
 export type ButtonOverrides = Partial<Record<ClickIntent, string[]>>;
 
 const CLICK_INTENTS: readonly ClickIntent[] = ["add_to_cart", "buy_now", "view_cart", "checkout", "place_order"];
 
-// The known controls for a host: bundled defaults with any overrides applied.
-// Intents not overridden keep their defaults; overridden intents the host has
-// no default for are added after the defaults.
-export function controlsFor(host: string, buttons?: ButtonOverrides): KnownControl[] {
-  const defaults = KNOWN_CONTROLS[host] ?? [];
+// The known controls for a host: its bundled defaults, then the platform's
+// controls, with any overrides applied. An overridden intent's list replaces
+// every bundled list for that intent (taking the first one's place); intents
+// not overridden keep their defaults; overridden intents with no default are
+// added at the end.
+export function controlsFor(host: string, buttons?: ButtonOverrides, platform?: Platform): KnownControl[] {
+  const hostControls = KNOWN_CONTROLS[host] ?? [];
+  const platformControls = platform ? (PLATFORM_CONTROLS[platform] ?? []) : [];
+  const defaults = platformControls.length ? [...hostControls, ...platformControls] : hostControls;
   if (!buttons) return defaults;
 
   const override = (intent: ClickIntent): string[] | undefined => {
     const list = buttons[intent];
     return Array.isArray(list) ? list : undefined;
   };
-  const merged = defaults.map((control) => {
+  const merged: KnownControl[] = [];
+  const replaced = new Set<ClickIntent>();
+  for (const control of defaults) {
     const selectors = override(control.intent);
-    return selectors ? { intent: control.intent, selectors } : control;
-  });
+    if (!selectors) merged.push(control);
+    else if (!replaced.has(control.intent)) {
+      replaced.add(control.intent);
+      merged.push({ intent: control.intent, selectors });
+    }
+  }
   for (const intent of CLICK_INTENTS) {
     const selectors = override(intent);
-    if (selectors && !defaults.some((control) => control.intent === intent)) merged.push({ intent, selectors });
+    if (selectors && !replaced.has(intent)) merged.push({ intent, selectors });
   }
   return merged;
 }
 
-// The known control `start` sits in, if any, for this host. A selector that
-// closest() rejects (config is data from the server) is skipped.
+// The known control `start` sits in, if any, for this host (and platform). A
+// selector that closest() rejects (config is data from the server) is skipped.
 export function matchKnown(
   start: Element,
   url: URL,
   buttons?: ButtonOverrides,
+  platform?: Platform,
 ): { intent: ClickIntent; element: Element } | null {
-  for (const control of controlsFor(url.hostname, buttons)) {
+  for (const control of controlsFor(url.hostname, buttons, platform)) {
     for (const selector of control.selectors) {
       let element: Element | null;
       try {
