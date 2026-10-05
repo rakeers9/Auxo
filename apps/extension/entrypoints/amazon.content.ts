@@ -27,7 +27,8 @@ import type {
   EventResult,
   ExitAction,
 } from "../src/messages";
-import { renderOverlay, type OverlayHandle } from "../src/overlay";
+import { renderClickAgainHint, renderOverlay, type OverlayHandle } from "../src/overlay";
+import { createClickGate } from "../src/tracking/gate";
 import { listenForBuyIntents } from "../src/tracking/listener";
 import { createMiniCartHandler } from "../src/tracking/minicart-handler";
 import { createPendingStore } from "../src/tracking/pending";
@@ -38,8 +39,19 @@ import { watchForChanges } from "../src/watch";
 const RECHECK_DEBOUNCE_MS = 500;
 
 // Dev builds (`wxt` or `wxt build --mode development`) show the always-on
-// debug panel instead of the overlay, to check what the extension reads.
+// debug panel instead of the overlay, to check what the extension reads, and
+// block every known buy click so the click-again flow can be tried.
 const DEBUG = import.meta.env.MODE === "development";
+
+// Dev only: the answer used to block a click when the page has none yet.
+// Never sent to the backend.
+const DEV_VERDICT: Verdict = {
+  decision_id: "00000000-0000-4000-8000-000000000000",
+  lane: "L3",
+  action: "block",
+  template_id: "l3-block",
+  cooldown_seconds: 5,
+};
 
 function sessionStorageOrNull(): Storage | null {
   try {
@@ -53,6 +65,9 @@ export default defineContentScript({
   matches: ["https://www.amazon.com/*"],
   async main(ctx) {
     let ui: ShadowRootContentScriptUi<OverlayHandle | null> | null = null;
+    let hintUi: ShadowRootContentScriptUi<OverlayHandle> | null = null;
+    // Stops known buy clicks when this page's answer is "block" (always in dev).
+    const gate = createClickGate({ alwaysOn: DEBUG, devVerdict: DEV_VERDICT });
     let debugUi: ShadowRootContentScriptUi<DebugPanel> | null = null;
 
     // What the debug panel shows, kept between checks.
@@ -104,9 +119,65 @@ export default defineContentScript({
     };
 
     // Every exit is logged (design invariant: every override is recorded).
+    // Continuing past an answer also lets the user's own next clicks through.
     const onExit = (verdict: Verdict, action: ExitAction) => {
       removeOverlay();
+      if (action === "overrode") gate.override(verdict.decision_id);
       sendEvent(buildExitEvent(verdict.decision_id, action));
+    };
+
+    const removeHint = () => {
+      hintUi?.remove();
+      hintUi = null;
+    };
+
+    // A known buy click was stopped. Show the pause for it; after Continue,
+    // the user clicks the real button again themselves (never replayed).
+    const showBlocked = async (verdict: Verdict, label: string, synthetic: boolean) => {
+      removeOverlay();
+      removeHint();
+      const next = await createShadowRootUi(ctx, {
+        name: "auxo-overlay",
+        position: "inline",
+        anchor: "body",
+        onMount: (container) =>
+          renderOverlay(
+            container,
+            verdict,
+            {
+              onExit: (action) => {
+                removeOverlay();
+                if (action === "overrode") {
+                  gate.override(verdict.decision_id);
+                  void showHint(label);
+                }
+                // The dev placeholder answer isn't a real decision.
+                if (!synthetic) sendEvent(buildExitEvent(verdict.decision_id, action));
+                note = `click on "${label}" was stopped; user chose ${action}`;
+                refreshDebug();
+              },
+            },
+            { clicked: label },
+          ),
+        onRemove: (handle) => handle?.destroy(),
+      });
+      if (ctx.isInvalid) return;
+      next.mount();
+      ui = next;
+    };
+
+    const showHint = async (label: string) => {
+      removeHint();
+      const next = await createShadowRootUi(ctx, {
+        name: "auxo-hint",
+        position: "inline",
+        anchor: "body",
+        onMount: (container) => renderClickAgainHint(container, label, { onDismiss: removeHint }),
+        onRemove: (handle) => handle?.destroy(),
+      });
+      if (ctx.isInvalid) return;
+      next.mount();
+      hintUi = next;
     };
 
     const show = async (verdict: Verdict) => {
@@ -176,6 +247,7 @@ export default defineContentScript({
           break;
         case "shown":
           if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
+          gate.setVerdict(outcome.verdict);
           backend = {
             status: "verdict",
             lane: outcome.verdict.lane,
@@ -273,6 +345,7 @@ export default defineContentScript({
         templateId: verdict.template_id,
       };
       note = "answer to the add to cart on the previous page (handed over by the worker)";
+      gate.setVerdict(verdict);
       void show(verdict);
       refreshDebug();
     };
@@ -283,7 +356,7 @@ export default defineContentScript({
     })();
     const stopWatching = watchForChanges(document.body, step(() => tracker.onPageChange()), {
       debounceMs: RECHECK_DEBOUNCE_MS,
-      ignore: () => [ui?.shadowHost, debugUi?.shadowHost],
+      ignore: () => [ui?.shadowHost, hintUi?.shadowHost, debugUi?.shadowHost],
     });
     // The cart and checkout pages track removals themselves (the tracker), so
     // the sidebar is only watched elsewhere, to avoid counting a removal twice.
@@ -294,16 +367,36 @@ export default defineContentScript({
         : watchMiniCart(document, () => readAmazonMiniCart(document, new URL(location.href), selectorOverrides).draft, {
             onChange: (before, after, diff) => void miniCart.onChange(before, after, diff),
           });
-    const stopListening = listenForBuyIntents(document, { classifyClick, classifySubmit }, (signal) => {
-      if (ctx.isInvalid) return;
-      void tracker.onBuyIntent(signal);
-    });
+    // Known buttons can be overridden per store by the backend config.
+    const stopListening = listenForBuyIntents(
+      document,
+      {
+        classifyClick: (target, url) => classifyClick(target, url, overrides?.buttons),
+        classifySubmit: (form, submitter, url) => classifySubmit(form, submitter, url, overrides?.buttons),
+      },
+      (signal) => {
+        if (ctx.isInvalid) return;
+        void tracker.onBuyIntent(signal);
+      },
+      undefined,
+      undefined,
+      {
+        shouldBlock: (signal) => !ctx.isInvalid && gate.check(signal).block,
+        onBlocked: (signal) => {
+          const result = gate.check(signal);
+          lastClick = { signal, at: new Date() };
+          if (result.block) void showBlocked(result.verdict, signal.label ?? "", result.synthetic);
+          refreshDebug();
+        },
+      },
+    );
 
     ctx.onInvalidated(() => {
       stopWatching();
       stopMiniCart();
       stopListening();
       removeOverlay();
+      removeHint();
       debugUi?.remove();
     });
   },

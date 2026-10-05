@@ -224,3 +224,67 @@ describe("cart sidebar on a real product page", () => {
     vi.useRealTimers();
   });
 });
+
+describe("blocking a purchase on the real checkout page", () => {
+  async function checkoutWithGate(alwaysOn = false) {
+    const { createClickGate } = await import("./gate");
+    document.documentElement.innerHTML = readFileSync(resolve(FIXTURES, "amazon-checkout-from-cart.html"), "utf8");
+    const url = new URL("https://www.amazon.com/checkout/p/p-X/spc");
+    const gate = createClickGate({ alwaysOn, devVerdict: { ...verdict, decision_id: "00000000-0000-4000-8000-000000000000" } });
+    const signals: string[] = [];
+    const blocked: string[] = [];
+    const stop = listenForBuyIntents(
+      document,
+      { classifyClick, classifySubmit },
+      (s) => signals.push(s.intent),
+      () => url,
+      () => Date.now(),
+      { shouldBlock: (s) => gate.check(s).block, onBlocked: (s) => blocked.push(s.intent) },
+    );
+    // Stand-in for Amazon's own handler on the place order control.
+    const placeOrder = vi.fn();
+    document.querySelector("#submitOrderButtonId")!.addEventListener("click", placeOrder);
+    const click = () => {
+      const inner = document.querySelector("#submitOrderButtonId")!.querySelector("span, input, a") ?? document.querySelector("#submitOrderButtonId")!;
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+      inner.dispatchEvent(event);
+      return event;
+    };
+    return { gate, signals, blocked, placeOrder, click, stop };
+  }
+
+  it("a 'block' answer stops Place your order; after Continue the user's own next click goes through", async () => {
+    const t = await checkoutWithGate();
+    t.gate.setVerdict({ ...verdict, lane: "L3", action: "block" });
+
+    const first = t.click();
+    expect(first.defaultPrevented).toBe(true);
+    expect(t.placeOrder).not.toHaveBeenCalled();
+    expect(t.blocked).toEqual(["place_order"]);
+    expect(t.signals).toEqual([]); // not recorded as a purchase attempt
+
+    t.gate.override(verdict.decision_id); // the user chose Continue on the pause
+    const second = t.click();
+    expect(second.defaultPrevented).toBe(false);
+    expect(t.placeOrder).toHaveBeenCalledTimes(1);
+    expect(t.signals).toEqual(["place_order"]);
+    t.stop();
+  });
+
+  it("pause and allow answers never stop the click", async () => {
+    const t = await checkoutWithGate();
+    t.gate.setVerdict({ ...verdict, lane: "L2", action: "pause" });
+
+    expect(t.click().defaultPrevented).toBe(false);
+    expect(t.placeOrder).toHaveBeenCalledTimes(1);
+    t.stop();
+  });
+
+  it("dev builds stop it even without an answer", async () => {
+    const t = await checkoutWithGate(true);
+
+    expect(t.click().defaultPrevented).toBe(true);
+    expect(t.placeOrder).not.toHaveBeenCalled();
+    t.stop();
+  });
+});
