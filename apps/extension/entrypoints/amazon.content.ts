@@ -10,8 +10,18 @@ import { buildExitEvent } from "../src/api/events";
 import { hashCart, inspectAmazonPage } from "../src/cart";
 import { classifyClick, classifySubmit } from "../src/clicks";
 import { createDebugPanel, type BackendStatus, type DebugPanel } from "../src/debug/panel";
-import { createCartFlow, type CartFlowOutcome } from "../src/flow";
-import type { ClickSignal, DecideMessage, DecideResult, EventMessage, EventResult, ExitAction } from "../src/messages";
+import { CONTENT_TIMEOUT_MS, createCartFlow, type CartFlowOutcome } from "../src/flow";
+import type {
+  AckMessage,
+  ClaimMessage,
+  ClaimResult,
+  ClickSignal,
+  DecideMessage,
+  DecideResult,
+  EventMessage,
+  EventResult,
+  ExitAction,
+} from "../src/messages";
 import { renderOverlay, type OverlayHandle } from "../src/overlay";
 import { listenForBuyIntents } from "../src/tracking/listener";
 import { createPendingStore } from "../src/tracking/pending";
@@ -45,6 +55,7 @@ export default defineContentScript({
     let trigger: Trigger | null = null;
     let lastClick: { signal: ClickSignal; at: Date } | null = null;
     let pendingPurchase: string | null = null;
+    let note: string | null = null;
     const events: Array<{ action: UserAction; decisionId: string; at: Date }> = [];
 
     const refreshDebug = () => {
@@ -61,6 +72,7 @@ export default defineContentScript({
         lastClick,
         events,
         pendingPurchase,
+        note,
       });
     };
 
@@ -149,8 +161,16 @@ export default defineContentScript({
     const flow = createCartFlow({
       inspect: () => inspectAmazonPage(document, new URL(location.href)),
       hash: hashCart,
-      requestVerdict: (cart, t) =>
-        browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart, trigger: t }),
+      requestVerdict: async (cart, t) => {
+        const result = await browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart, trigger: t });
+        // This page got its answer, so the worker shouldn't hand it to the next page.
+        if (result.ok) {
+          void browser.runtime
+            .sendMessage<AckMessage>({ type: "auxo:ack", decisionId: result.verdict.decision_id })
+            .catch(() => {});
+        }
+        return result;
+      },
       show: (verdict) => void show(verdict),
     });
 
@@ -174,7 +194,30 @@ export default defineContentScript({
       void run();
     };
 
-    step(() => tracker.onLoad())();
+    // An add to cart moves to a new page before it's answered; show that
+    // answer here if the page that asked didn't get to.
+    const claimHandoff = async () => {
+      const claimed = await Promise.race([
+        browser.runtime.sendMessage<ClaimMessage, ClaimResult>({ type: "auxo:claim" }).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), CONTENT_TIMEOUT_MS)),
+      ]);
+      const verdict = claimed?.verdict;
+      if (!verdict || ctx.isInvalid) return;
+      backend = {
+        status: "verdict",
+        lane: verdict.lane,
+        decisionId: verdict.decision_id,
+        templateId: verdict.template_id,
+      };
+      note = "answer to the add to cart on the previous page (handed over by the worker)";
+      void show(verdict);
+      refreshDebug();
+    };
+
+    step(async () => {
+      await claimHandoff();
+      await tracker.onLoad();
+    })();
     const stopWatching = watchForChanges(document.body, step(() => tracker.onPageChange()), {
       debounceMs: RECHECK_DEBOUNCE_MS,
       ignore: () => [ui?.shadowHost, debugUi?.shadowHost],

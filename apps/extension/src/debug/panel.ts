@@ -22,6 +22,8 @@ export interface DebugSnapshot {
   // Most recent first.
   events?: Array<{ action: UserAction; decisionId: string; at: Date }>;
   pendingPurchase?: string | null;
+  // Anything else worth knowing about this page's answer.
+  note?: string | null;
 }
 
 export interface DebugPanel {
@@ -106,6 +108,7 @@ function renderBody(doc: Document, s: DebugSnapshot): Node[] {
       ["trigger", s.trigger ? triggerText(s.trigger) : "none"],
       ["last click", s.lastClick ? clickText(s.lastClick.signal, s.lastClick.at) : "none"],
       ...(s.pendingPurchase ? ([["purchase", `pending confirmation (decision ${s.pendingPurchase})`]] as Array<[string, string]>) : []),
+      ...(s.note ? ([["note", s.note]] as Array<[string, string]>) : []),
     ]),
   );
 

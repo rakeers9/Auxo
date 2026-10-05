@@ -46,3 +46,22 @@ export async function handleEventMessage(
     return { ok: false, reason: "network" };
   }
 }
+
+export function isAckMessage(message: unknown): message is { type: "auxo:ack"; decisionId: string } {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as { type?: unknown }).type === "auxo:ack" &&
+    typeof (message as { decisionId?: unknown }).decisionId === "string"
+  );
+}
+
+export function isClaimMessage(message: unknown): message is { type: "auxo:claim" } {
+  return typeof message === "object" && message !== null && (message as { type?: unknown }).type === "auxo:claim";
+}
+
+// The validated trigger of a decide message, if it has one.
+export function triggerOf(message: { trigger?: unknown }): Trigger | undefined {
+  const parsed = message.trigger === undefined ? undefined : TriggerSchema.safeParse(message.trigger);
+  return parsed?.success ? parsed.data : undefined;
+}

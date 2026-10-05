@@ -56,3 +56,20 @@ export interface ClickSignal {
   source: "known" | "guess";
   label?: string;
 }
+
+// Content script -> worker: this page received the answer to its own request,
+// so the worker shouldn't hand it to the next page (see src/api/handoff.ts).
+export interface AckMessage {
+  type: "auxo:ack";
+  decisionId: string;
+}
+
+// Content script -> worker, on page load: is there an add-to-cart answer the
+// previous page in this tab didn't get to show?
+export interface ClaimMessage {
+  type: "auxo:claim";
+}
+
+export interface ClaimResult {
+  verdict: Verdict | null;
+}

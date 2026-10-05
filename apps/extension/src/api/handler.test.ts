@@ -2,7 +2,15 @@ import type { Cart, DecisionEvent, Trigger, Verdict } from "@auxo/shared";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DecideResult, EventResult } from "../messages";
-import { handleDecideMessage, handleEventMessage, isDecideMessage, isEventMessage } from "./handler";
+import {
+  handleDecideMessage,
+  handleEventMessage,
+  isAckMessage,
+  isClaimMessage,
+  isDecideMessage,
+  isEventMessage,
+  triggerOf,
+} from "./handler";
 
 const cart: Cart = {
   merchant: "amazon.com",
@@ -131,5 +139,22 @@ describe("handleEventMessage", () => {
       ok: false,
       reason: "network",
     });
+  });
+});
+
+describe("hand-off messages", () => {
+  it("recognizes ack and claim messages", () => {
+    expect(isAckMessage({ type: "auxo:ack", decisionId: "x" })).toBe(true);
+    expect(isAckMessage({ type: "auxo:ack" })).toBe(false);
+    expect(isClaimMessage({ type: "auxo:claim" })).toBe(true);
+    expect(isClaimMessage({ type: "auxo:ack", decisionId: "x" })).toBe(false);
+    expect(isClaimMessage(null)).toBe(false);
+  });
+
+  it("extracts only a valid trigger", () => {
+    const trigger = { intent: "add_to_cart", source: "known", page_type: "product", occurred_at: "2026-10-04T20:00:00.000Z" };
+    expect(triggerOf({ trigger })).toEqual(trigger);
+    expect(triggerOf({ trigger: { intent: "nope" } })).toBeUndefined();
+    expect(triggerOf({})).toBeUndefined();
   });
 });

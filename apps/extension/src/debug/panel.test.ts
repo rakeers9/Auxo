@@ -135,6 +135,13 @@ describe("click tracking lines", () => {
     expect(text).toContain("pending confirmation");
   });
 
+  it("shows a note when there is one", () => {
+    const { root, panel } = mount();
+    panel.update(snapshot({ note: "handed over by the worker" }));
+
+    expect(root.textContent).toContain("handed over by the worker");
+  });
+
   it("shows 'none' when nothing was clicked", () => {
     const { root, panel } = mount();
     panel.update(snapshot());
