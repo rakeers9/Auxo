@@ -45,6 +45,13 @@ export const LANE_TEMPLATES: Record<Lane, OverlayTemplate> = {
   },
 };
 
+// Copy for a stopped click whose lane has no words of its own (L0, e.g. in dev
+// mode, which can stop a click on any answer).
+export const CLICK_PAUSE_COPY: Pick<OverlayTemplate, "title" | "body"> = {
+  title: "Quick pause",
+  body: "Take a second before you continue. You can still go ahead once the timer runs out.",
+};
+
 const TEMPLATES_BY_ID = new Map<string, OverlayTemplate>(
   Object.values(LANE_TEMPLATES).map((template) => [template.id, template]),
 );
