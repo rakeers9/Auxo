@@ -6,4 +6,6 @@ export { hashCart } from "./hash";
 export { extractAmazonProduct, isAmazonProductPage } from "./product";
 export { inspectAmazonPage } from "./inspect";
 export { parsePriceToMinor } from "./price";
+export { AMAZON_SELECTORS, resolveAmazonSelectors } from "./selectors";
+export type { AmazonSelectorKey, SelectorOverrides } from "./selectors";
 export type { PageInspection } from "../messages";

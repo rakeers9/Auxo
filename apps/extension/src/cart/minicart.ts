@@ -1,6 +1,7 @@
 import type { CartDraft } from "../messages";
 import { parsePriceToMinor } from "./price";
 import { CURRENCY, cleanName, finishReading, quote, type Reading } from "./reading";
+import { AMAZON_SELECTORS, resolveAmazonSelectors, withConfigNotes, type AmazonSelectors, type SelectorOverrides } from "./selectors";
 
 // The nav mini cart (#nav-flyout-ewc) lists the whole cart on most amazon.com
 // pages, with +/- steppers and remove buttons. Selectors come from real pages
@@ -8,10 +9,7 @@ import { CURRENCY, cleanName, finishReading, quote, type Reading } from "./readi
 // for later, leaves its line in the DOM with the old data-price and
 // data-quantity and NO data-removed: the only sign is that its remove / saved
 // message loses aok-hidden. The subtotal already excludes it. The hidden
-// #ewc-total-quantity goes stale, so it isn't used.
-const LINES = '#nav-flyout-ewc .ewc-item[data-itemtype="active"][data-asin]';
-const GONE_MESSAGES = ".ewc-item-remove-msg, .ewc-item-moved-to-sfl-msg";
-const SUBTOTAL = "#nav-flyout-ewc .ewc-subtotal-amount";
+// #ewc-total-quantity goes stale, so it isn't used. Selectors: "minicart.*".
 
 export interface MiniCartLine {
   itemId: string;
@@ -33,15 +31,15 @@ export interface MiniCartScan {
 
 // Read every live mini cart line and the mini cart subtotal, without judging
 // whether they agree (callers decide; see readAmazonMiniCart).
-export function scanMiniCart(doc: Document): MiniCartScan {
+export function scanMiniCart(doc: Document, s: AmazonSelectors = AMAZON_SELECTORS): MiniCartScan {
   const problems: string[] = [];
   const lines: MiniCartLine[] = [];
   let sum = 0;
   let skipped = 0;
-  const elements = [...doc.querySelectorAll(LINES)];
+  const elements = [...doc.querySelectorAll(s["minicart.lines"])];
 
   elements.forEach((element, index) => {
-    const gone = [...element.querySelectorAll(GONE_MESSAGES)].some((m) => !m.classList.contains("aok-hidden"));
+    const gone = [...element.querySelectorAll(s["minicart.goneMessages"])].some((m) => !m.matches(s["minicart.hiddenMessage"]));
     if (gone) {
       skipped++;
       return;
@@ -62,14 +60,15 @@ export function scanMiniCart(doc: Document): MiniCartScan {
     }
   });
 
-  const subtotalText = doc.querySelector(SUBTOTAL)?.textContent ?? null;
+  const subtotalText = doc.querySelector(s["minicart.subtotal"])?.textContent ?? null;
   return { lines, problems, sum, subtotal: parsePriceToMinor(subtotalText ?? "", CURRENCY), subtotalText, skipped, seen: elements.length };
 }
 
 // The whole cart as the mini cart shows it, on any page that has one. The
 // live lines must add up exactly to the mini cart subtotal, or the draft is null.
-export function readAmazonMiniCart(doc: Document, url: URL): Reading {
-  const scan = scanMiniCart(doc);
+export function readAmazonMiniCart(doc: Document, url: URL, overrides?: SelectorOverrides): Reading {
+  const { selectors: s, notes } = resolveAmazonSelectors(doc, overrides);
+  const scan = scanMiniCart(doc, s);
   const problems = [...scan.problems];
   const details: Record<string, string> = {
     "mini cart items": String(scan.seen),
@@ -79,10 +78,10 @@ export function readAmazonMiniCart(doc: Document, url: URL): Reading {
 
   if (scan.seen - scan.skipped === 0) problems.push("the mini cart is empty or not loaded");
   if (scan.subtotal === null && scan.seen - scan.skipped > 0) {
-    problems.push(scan.subtotalText === null ? `no mini cart subtotal (${SUBTOTAL})` : `mini cart subtotal ${quote(scan.subtotalText)} isn't a readable price`);
+    problems.push(scan.subtotalText === null ? `no mini cart subtotal (${s["minicart.subtotal"]})` : `mini cart subtotal ${quote(scan.subtotalText)} isn't a readable price`);
   }
 
   const items: CartDraft["items"] = scan.lines.map(({ name, price_minor, qty }) => ({ name, price_minor, qty }));
   // The cart page's URL: the mini cart is the cart, whatever page shows it.
-  return finishReading(`${url.origin}/gp/cart/view.html`, items, scan.subtotal, problems, details, "the mini cart subtotal");
+  return withConfigNotes(finishReading(`${url.origin}/gp/cart/view.html`, items, scan.subtotal, problems, details, "the mini cart subtotal"), notes);
 }
