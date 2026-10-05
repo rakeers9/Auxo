@@ -95,6 +95,18 @@ describe("createMiniCartHandler", () => {
     expect(t.decideAdded.mock.calls[0]?.[0].items).toEqual([{ name: "Mug", price_minor: 999, qty: 2 }]);
   });
 
+  it("credits the next added items to an add-to-cart click, once", async () => {
+    const t = setup("product");
+    t.handler.noteAddClick({ intent: "add_to_cart", source: "known", label: "Add to cart" });
+
+    await t.handler.onChange(cart([mug]), cart([mug, lamp]), { removed: [], added: [lamp] });
+    expect(t.decideAdded.mock.calls[0]?.[1]).toMatchObject({ intent: "add_to_cart", source: "known", label: "Add to cart" });
+
+    await t.handler.onChange(cart([mug, lamp]), cart([mug, { ...lamp, qty: 2 }]), { removed: [], added: [lamp] });
+    expect(t.decideAdded.mock.calls[1]?.[1]).toMatchObject({ source: "page" });
+    expect(t.decideAdded.mock.calls[1]?.[1]).not.toHaveProperty("label");
+  });
+
   it("maps pages without a trigger page type to 'other'", async () => {
     const t = setup("added_to_cart");
     await t.handler.onChange(cart([mug]), cart([mug, lamp]), { removed: [], added: [lamp] });

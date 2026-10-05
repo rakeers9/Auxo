@@ -1,6 +1,6 @@
 import type { DecisionEvent, Trigger, TriggerPageType } from "@auxo/shared";
 
-import type { CartDraft, PageType } from "../messages";
+import type { CartDraft, ClickSignal, PageType } from "../messages";
 import { buildDecisionEvent } from "./events";
 import type { RemovedItem } from "./removal";
 import type { MiniCartDiff } from "./sidesheet";
@@ -19,6 +19,10 @@ export interface MiniCartHandler {
   // An add-to-cart click on this page was already decided: don't count the
   // same item showing up in the sidebar as a second add.
   noteClickedAdd(draft: CartDraft): void;
+  // An add-to-cart click whose items weren't read at the click (e.g. Shopify,
+  // where the add shows up in /cart.js): the next added items are credited
+  // to it in the trigger.
+  noteAddClick(signal: ClickSignal): void;
   onChange(before: CartDraft, after: CartDraft, diff: MiniCartDiff): Promise<void>;
 }
 
@@ -28,9 +32,16 @@ export interface MiniCartHandler {
 export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandler {
   const now = deps.now ?? (() => new Date());
   let clicked: RemovedItem[] = [];
+  let addClick: ClickSignal | null = null;
 
   return {
+    noteAddClick(signal) {
+      addClick = signal;
+    },
+
     noteClickedAdd(draft) {
+      // That click was decided directly, so it shouldn't label a later add.
+      addClick = null;
       clicked.push(...draft.items.map((item) => ({ ...item })));
     },
 
@@ -68,11 +79,14 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
         currency: after.currency,
         url: after.url,
       };
+      const click = addClick;
+      addClick = null;
       await deps.decideAdded(draft, {
         intent: "add_to_cart",
-        source: "page",
+        source: click?.source ?? "page",
         page_type: triggerPageType(deps.pageType()),
         occurred_at: now().toISOString(),
+        ...(click?.label ? { label: click.label } : {}),
       });
     },
   };

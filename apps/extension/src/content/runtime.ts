@@ -415,6 +415,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     },
     (signal) => {
       if (ctx.isInvalid) return;
+      if (signal.intent === "add_to_cart") miniCart.noteAddClick(signal);
       void tracker.onBuyIntent(signal);
     },
     undefined,
