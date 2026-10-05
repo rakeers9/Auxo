@@ -12,6 +12,8 @@ import { SupabaseSettingsRepository } from "./repositories/supabase-settings-rep
 import { CloudflareClefProvider } from "./services/decision-model-provider.js";
 import { InMemoryPassRepository } from "./repositories/pass-repository.js";
 import { SupabasePassRepository } from "./repositories/supabase-pass-repository.js";
+import { InMemoryStoreConfigRepository } from "./repositories/store-config-repository.js";
+import { SupabaseStoreConfigRepository } from "./repositories/supabase-store-config-repository.js";
 
 const config = loadConfig();
 
@@ -50,6 +52,9 @@ const app = await buildApp({
   passRepository: serviceClient
     ? new SupabasePassRepository(serviceClient)
     : new InMemoryPassRepository(),
+  storeConfigRepository: serviceClient
+    ? new SupabaseStoreConfigRepository(serviceClient)
+    : new InMemoryStoreConfigRepository(),
   ...(config.cloudflareAccountId && config.cloudflareApiToken
     ? {
         decisionModelProvider: new CloudflareClefProvider({

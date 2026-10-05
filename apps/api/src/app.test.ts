@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DecideResponseSchema } from "@auxo/shared";
+import { DecideResponseSchema, StoreConfigSchema } from "@auxo/shared";
 
 import { buildApp } from "./app.js";
 import type { AuthService } from "./auth/auth-service.js";
 import { InMemoryDecisionRepository } from "./repositories/decision-repository.js";
+import { InMemoryStoreConfigRepository } from "./repositories/store-config-repository.js";
 
 const openApps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
@@ -528,5 +529,180 @@ describe("budget settings", () => {
     openApps.push(app);
     expect((await app.inject({ method: "GET", url: "/v1/rules" })).statusCode).toBe(401);
     expect((await app.inject({ method: "GET", url: "/v1/budgets" })).statusCode).toBe(401);
+  });
+});
+
+describe("GET /v1/config", () => {
+  const amazon = { id: randomUUID(), domain: "www.amazon.com", enabled: true };
+  const ebay = { id: randomUUID(), domain: "www.ebay.com", enabled: true };
+  const v1 = { buttons: { add_to_cart: ["#add-to-cart-button"] } };
+  const v2 = { buttons: { add_to_cart: ["#add-to-cart-button-v2"] }, selectors: { cart_subtotal: "#sc-subtotal" } };
+
+  async function getConfig(repository: InMemoryStoreConfigRepository, options: Parameters<typeof buildApp>[0] = {}) {
+    const app = await buildApp({ storeConfigRepository: repository, ...options });
+    openApps.push(app);
+    const response = await app.inject({ method: "GET", url: "/v1/config" });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(StoreConfigSchema.safeParse(body).success).toBe(true);
+    return body;
+  }
+
+  it("serves an empty default config when no stores are configured", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/v1/config" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ version: "default", stores: {} });
+  });
+
+  it("serves a store's overrides from its recipe", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: v2 }],
+    });
+
+    const body = await getConfig(repository);
+
+    expect(body.stores).toEqual({ "www.amazon.com": { enabled: true, ...v2 } });
+    expect(body.version).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("serves a store with no enabled recipe as just its switch", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: false, selectors: v1 }],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.amazon.com": { enabled: true } });
+  });
+
+  it("uses the latest enabled recipe version", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [
+        { merchant_id: amazon.id, version: 2, enabled: true, selectors: v2 },
+        { merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 },
+      ],
+    });
+
+    expect((await getConfig(repository)).stores["www.amazon.com"]).toEqual({ enabled: true, ...v2 });
+  });
+
+  it("rolls back to the previous version when the latest recipe is disabled", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [
+        { merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 },
+        { merchant_id: amazon.id, version: 2, enabled: false, selectors: v2 },
+      ],
+    });
+
+    expect((await getConfig(repository)).stores["www.amazon.com"]).toEqual({ enabled: true, ...v1 });
+  });
+
+  it("turns a store off with the merchant switch, even with recipes", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [{ ...amazon, enabled: false }],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 }],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.amazon.com": { enabled: false } });
+  });
+
+  it("skips an invalid recipe without falling back or breaking other stores", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon, ebay],
+      recipes: [
+        { merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 },
+        // page_view isn't a button intent, and enabled belongs to the merchant.
+        { merchant_id: amazon.id, version: 2, enabled: true, selectors: { buttons: { page_view: ["#x"] } } },
+        { merchant_id: ebay.id, version: 1, enabled: true, selectors: v1 },
+      ],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({
+      "www.amazon.com": { enabled: true },
+      "www.ebay.com": { enabled: true, ...v1 },
+    });
+  });
+
+  it.each([
+    ["null", null],
+    ["a string", "#add-to-cart"],
+    ["an enabled key", { enabled: false, ...v1 }],
+    ["an empty selector list", { buttons: { add_to_cart: [] } }],
+  ])("skips a recipe that is %s", async (_label, selectors) => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors }],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.amazon.com": { enabled: true } });
+  });
+
+  it("skips a merchant whose domain can't be a store key", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [{ id: randomUUID(), domain: "  ", enabled: true }, ebay],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.ebay.com": { enabled: true } });
+  });
+
+  it("keys stores by lowercase hostname", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [{ ...amazon, domain: "WWW.Amazon.com" }],
+    });
+
+    expect(Object.keys((await getConfig(repository)).stores)).toEqual(["www.amazon.com"]);
+  });
+
+  it("changes the version when an override changes, including a delete", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 }],
+    });
+    const app = await buildApp({ storeConfigRepository: repository });
+    openApps.push(app);
+    const version = async () => (await app.inject({ method: "GET", url: "/v1/config" })).json().version;
+
+    const first = await version();
+    expect(await version()).toBe(first);
+
+    repository.upsertRecipe({ merchant_id: amazon.id, version: 2, enabled: true, selectors: v2 });
+    const second = await version();
+    expect(second).not.toBe(first);
+
+    // Deleting the newest recipe goes back to exactly the first config.
+    repository.deleteRecipe(amazon.id, 2);
+    expect(await version()).toBe(first);
+
+    repository.deleteRecipe(amazon.id, 1);
+    expect(await version()).not.toBe(first);
+  });
+
+  it("keeps the version when the same config is stored in a different order", async () => {
+    const a = new InMemoryStoreConfigRepository({
+      merchants: [amazon, ebay],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: { selectors: { a: "#a", b: "#b" }, buttons: v1.buttons } }],
+    });
+    const b = new InMemoryStoreConfigRepository({
+      merchants: [ebay, amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: { buttons: v1.buttons, selectors: { b: "#b", a: "#a" } } }],
+    });
+
+    expect((await getConfig(a)).version).toBe((await getConfig(b)).version);
+  });
+
+  it("requires authentication like the other routes", async () => {
+    const app = await buildApp({ authRequired: true, storeConfigRepository: new InMemoryStoreConfigRepository() });
+    openApps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/v1/config" });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ error: { code: "UNAUTHORIZED" } });
   });
 });
