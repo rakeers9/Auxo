@@ -77,7 +77,7 @@ describe("createTracker", () => {
     await t.tracker.onBuyIntent(signal("add_to_cart"));
 
     expect(t.check).toHaveBeenCalledWith({ signal: signal("add_to_cart"), pageType: "product", at: NOW.toISOString() });
-    expect(t.pending.takeClick(NOW)).toBeNull();
+    expect(t.pending.takeClick()).toBeNull();
   });
 
   it("remembers buy now / cart / checkout clicks for the next page", async () => {
@@ -86,7 +86,7 @@ describe("createTracker", () => {
       await t.tracker.onBuyIntent(signal(intent));
 
       expect(t.check).not.toHaveBeenCalled();
-      expect(t.pending.takeClick(NOW)?.signal.intent).toBe(intent);
+      expect(t.pending.takeClick()?.signal.intent).toBe(intent);
     }
   });
 
@@ -100,13 +100,56 @@ describe("createTracker", () => {
     expect(next.check).toHaveBeenCalledWith({ signal: signal("buy_now"), pageType: "product", at: NOW.toISOString() });
   });
 
+  it("keeps the click until the page is read, then forgets it", async () => {
+    const first = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
+    await first.tracker.onBuyIntent(signal("buy_now"));
+
+    // Checkout loads before its items render: not readable yet.
+    const next = setup({ pageType: "checkout", draft: null, problems: ["items not shown yet"] });
+    next.check.mockImplementation(async () => ({ status: "unreadable", pageType: "checkout", problems: ["items not shown yet"] }));
+    await next.tracker.onLoad();
+    expect(next.check).toHaveBeenLastCalledWith({ signal: signal("buy_now"), pageType: "product", at: NOW.toISOString() });
+
+    // Still not ready on the first re-render: the click keeps waiting.
+    await next.tracker.onPageChange();
+    expect(next.check).toHaveBeenLastCalledWith({ signal: signal("buy_now"), pageType: "product", at: NOW.toISOString() });
+
+    // The items render: the read succeeds with the click, and it's used up.
+    next.check.mockResolvedValueOnce({
+      status: "shown",
+      pageType: "checkout",
+      draft: draftOf([lamp]),
+      cartHash: "h",
+      trigger: { intent: "buy_now", source: "known", page_type: "checkout", occurred_at: NOW.toISOString() },
+      verdict: verdict("2b9ebefe-78c8-561e-9a68-da51842c65a8"),
+    });
+    await next.tracker.onPageChange();
+    expect(next.check).toHaveBeenLastCalledWith({ signal: signal("buy_now"), pageType: "product", at: NOW.toISOString() });
+
+    await next.tracker.onPageChange();
+    expect(next.check).toHaveBeenLastCalledWith(null);
+  });
+
+  it("forgets the click once a page is read, even if it isn't a shopping page", async () => {
+    const first = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
+    await first.tracker.onBuyIntent(signal("view_cart"));
+
+    const next = setup({ pageType: "other", draft: null, problems: [] });
+    next.check.mockResolvedValue({ status: "skipped", pageType: "other", reason: "not_shopping_page" });
+    await next.tracker.onLoad();
+    await next.tracker.onPageChange();
+
+    expect(next.check).toHaveBeenLastCalledWith(null);
+    expect(next.pending.takeClick()).toBeNull();
+  });
+
   it("does not use up the remembered click on in-page changes", async () => {
     const t = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
     await t.tracker.onBuyIntent(signal("buy_now"));
     await t.tracker.onPageChange();
 
     expect(t.check).toHaveBeenLastCalledWith(null);
-    expect(t.pending.takeClick(NOW)?.signal.intent).toBe("buy_now");
+    expect(t.pending.takeClick()?.signal.intent).toBe("buy_now");
   });
 
   it("reports items removed after a decision, once", async () => {
@@ -149,7 +192,7 @@ describe("createTracker", () => {
     await t.tracker.onLoad();
 
     expect(await t.tracker.onBuyIntent(signal("place_order"))).toBeNull();
-    expect(t.pending.takePurchase(NOW)).toEqual({
+    expect(t.pending.takePurchase()).toEqual({
       decisionId: "2b9ebefe-78c8-561e-9a68-da51842c65a8",
       draft: draftOf([lamp]),
       at: NOW.toISOString(),
@@ -161,7 +204,7 @@ describe("createTracker", () => {
     const t = setup({ pageType: "checkout", draft: draftOf([lamp]), problems: [] });
 
     await t.tracker.onBuyIntent(signal("place_order"));
-    expect(t.pending.takePurchase(NOW)).toBeNull();
+    expect(t.pending.takePurchase()).toBeNull();
   });
 
   it("notes clicks, outcomes, and events for the debug panel", async () => {

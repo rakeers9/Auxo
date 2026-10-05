@@ -3,10 +3,8 @@ import type { TriggerPageType } from "@auxo/shared";
 import type { CartDraft, ClickSignal } from "../messages";
 
 // A buy-intent click usually loads a new page, so it's remembered in the
-// tab's sessionStorage (same origin, same tab) for the next page to use.
-export const CLICK_MAX_AGE_MS = 30_000;
-// The order confirmation page can take a while (payment checks, redirects).
-export const PURCHASE_MAX_AGE_MS = 10 * 60_000;
+// tab's sessionStorage (same origin, same tab, cleared when the tab closes)
+// until a page reads it. There's no timer: the next page read uses it.
 
 const CLICK_KEY = "auxo:pending-click";
 const PURCHASE_KEY = "auxo:pending-purchase";
@@ -19,7 +17,8 @@ export interface PendingClick {
 }
 
 // Saved on a "Place your order" click, so the confirmation page can report
-// what was bought and which decision it followed.
+// what was bought and which decision it followed. The next place-order click
+// replaces it.
 export interface PendingPurchase {
   decisionId: string;
   draft: CartDraft;
@@ -28,24 +27,25 @@ export interface PendingPurchase {
 
 export interface PendingStore {
   saveClick(click: PendingClick): void;
-  // Returns the click if it's fresh, and always clears it.
-  takeClick(now: Date): PendingClick | null;
+  // Returns the remembered click, if any, and clears it.
+  takeClick(): PendingClick | null;
   savePurchase(purchase: PendingPurchase): void;
-  takePurchase(now: Date): PendingPurchase | null;
+  // Returns the remembered purchase, if any, and clears it.
+  takePurchase(): PendingPurchase | null;
 }
 
 // storage is null when sessionStorage is unavailable; then nothing is kept.
 export function createPendingStore(storage: Storage | null): PendingStore {
   return {
     saveClick: (click) => write(storage, CLICK_KEY, click),
-    takeClick: (now) => {
+    takeClick: () => {
       const click = take(storage, CLICK_KEY);
-      return isPendingClick(click) && isFresh(click.at, now, CLICK_MAX_AGE_MS) ? click : null;
+      return isPendingClick(click) ? click : null;
     },
     savePurchase: (purchase) => write(storage, PURCHASE_KEY, purchase),
-    takePurchase: (now) => {
+    takePurchase: () => {
       const purchase = take(storage, PURCHASE_KEY);
-      return isPendingPurchase(purchase) && isFresh(purchase.at, now, PURCHASE_MAX_AGE_MS) ? purchase : null;
+      return isPendingPurchase(purchase) ? purchase : null;
     },
   };
 }
@@ -66,11 +66,6 @@ function take(storage: Storage | null, key: string): unknown {
   } catch {
     return null;
   }
-}
-
-function isFresh(at: string, now: Date, maxAgeMs: number): boolean {
-  const age = now.getTime() - Date.parse(at);
-  return Number.isFinite(age) && age >= 0 && age <= maxAgeMs;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

@@ -120,7 +120,7 @@ describe("click tracking on real Amazon pages", () => {
 
     await checkout.click("#submitOrderButtonId");
 
-    const purchase = createPendingStore(sessionStorage).takePurchase(new Date());
+    const purchase = createPendingStore(sessionStorage).takePurchase();
     expect(purchase?.decisionId).toBe(verdict.decision_id);
     expect(purchase?.draft.items.length).toBeGreaterThan(0);
     checkout.stop();

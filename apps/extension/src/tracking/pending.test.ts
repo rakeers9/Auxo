@@ -1,15 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { CartDraft } from "../messages";
-import { CLICK_MAX_AGE_MS, createPendingStore, PURCHASE_MAX_AGE_MS, type PendingClick } from "./pending";
-
-const t0 = new Date("2026-10-04T20:00:00.000Z");
-const later = (ms: number) => new Date(t0.getTime() + ms);
+import { createPendingStore, type PendingClick } from "./pending";
 
 const click: PendingClick = {
   signal: { intent: "buy_now", source: "known", label: "Buy Now" },
   pageType: "product",
-  at: t0.toISOString(),
+  at: "2026-10-04T20:00:00.000Z",
 };
 
 const draft: CartDraft = {
@@ -23,43 +20,48 @@ const draft: CartDraft = {
 beforeEach(() => sessionStorage.clear());
 
 describe("pending clicks", () => {
-  it("returns a fresh click once, then nothing", () => {
+  it("returns the click once, then nothing", () => {
     const store = createPendingStore(sessionStorage);
     store.saveClick(click);
 
-    expect(store.takeClick(later(1_000))).toEqual(click);
-    expect(store.takeClick(later(1_000))).toBeNull();
+    expect(store.takeClick()).toEqual(click);
+    expect(store.takeClick()).toBeNull();
   });
 
   it("survives a new store on the same storage (a page change)", () => {
     createPendingStore(sessionStorage).saveClick(click);
 
-    expect(createPendingStore(sessionStorage).takeClick(later(500))).toEqual(click);
+    expect(createPendingStore(sessionStorage).takeClick()).toEqual(click);
   });
 
-  it("drops a click older than the max age", () => {
+  it("has no time limit: an old click is still used by the next read", () => {
     const store = createPendingStore(sessionStorage);
-    store.saveClick(click);
+    store.saveClick({ ...click, at: "2020-01-01T00:00:00.000Z" });
 
-    expect(store.takeClick(later(CLICK_MAX_AGE_MS + 1))).toBeNull();
-    expect(sessionStorage.length).toBe(0);
+    expect(store.takeClick()?.at).toBe("2020-01-01T00:00:00.000Z");
   });
 
-  it("drops a click from the future and malformed data", () => {
+  it("a newer click replaces an unread one", () => {
     const store = createPendingStore(sessionStorage);
     store.saveClick(click);
-    expect(store.takeClick(later(-1))).toBeNull();
+    store.saveClick({ ...click, signal: { intent: "checkout", source: "known" } });
 
+    expect(store.takeClick()?.signal.intent).toBe("checkout");
+  });
+
+  it("drops malformed data", () => {
+    const store = createPendingStore(sessionStorage);
     sessionStorage.setItem("auxo:pending-click", "{not json");
-    expect(store.takeClick(t0)).toBeNull();
-    sessionStorage.setItem("auxo:pending-click", JSON.stringify({ at: t0.toISOString() }));
-    expect(store.takeClick(t0)).toBeNull();
+    expect(store.takeClick()).toBeNull();
+    sessionStorage.setItem("auxo:pending-click", JSON.stringify({ at: click.at }));
+    expect(store.takeClick()).toBeNull();
+    expect(sessionStorage.length).toBe(0);
   });
 
   it("works without storage", () => {
     const store = createPendingStore(null);
     store.saveClick(click);
-    expect(store.takeClick(t0)).toBeNull();
+    expect(store.takeClick()).toBeNull();
   });
 
   it("never throws when storage throws", () => {
@@ -77,33 +79,34 @@ describe("pending clicks", () => {
     const store = createPendingStore(broken);
 
     expect(() => store.saveClick(click)).not.toThrow();
-    expect(store.takeClick(t0)).toBeNull();
+    expect(store.takeClick()).toBeNull();
   });
 });
 
 describe("pending purchases", () => {
-  it("keeps a purchase for the confirmation page, once", () => {
+  it("keeps a purchase until it's read, once", () => {
     const store = createPendingStore(sessionStorage);
-    const purchase = { decisionId: "2b9ebefe-78c8-561e-9a68-da51842c65a8", draft, at: t0.toISOString() };
+    const purchase = { decisionId: "2b9ebefe-78c8-561e-9a68-da51842c65a8", draft, at: click.at };
     store.savePurchase(purchase);
 
-    expect(store.takePurchase(later(60_000))).toEqual(purchase);
-    expect(store.takePurchase(later(60_000))).toBeNull();
+    expect(store.takePurchase()).toEqual(purchase);
+    expect(store.takePurchase()).toBeNull();
   });
 
-  it("drops a stale purchase", () => {
+  it("the next place-order click replaces it", () => {
     const store = createPendingStore(sessionStorage);
-    store.savePurchase({ decisionId: "x", draft, at: t0.toISOString() });
+    store.savePurchase({ decisionId: "first", draft, at: click.at });
+    store.savePurchase({ decisionId: "second", draft, at: click.at });
 
-    expect(store.takePurchase(later(PURCHASE_MAX_AGE_MS + 1))).toBeNull();
+    expect(store.takePurchase()?.decisionId).toBe("second");
   });
 
   it("keeps clicks and purchases separate", () => {
     const store = createPendingStore(sessionStorage);
     store.saveClick(click);
-    store.savePurchase({ decisionId: "x", draft, at: t0.toISOString() });
+    store.savePurchase({ decisionId: "x", draft, at: click.at });
 
-    expect(store.takeClick(t0)).toEqual(click);
-    expect(store.takePurchase(t0)?.decisionId).toBe("x");
+    expect(store.takeClick()).toEqual(click);
+    expect(store.takePurchase()?.decisionId).toBe("x");
   });
 });
