@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- Sanitized snippet of https://theme-horizon-demo.myshopify.com/products/<handle> (cart drawer open, one item), saved 2026-10-05.
+     Only the buy-intent controls are kept; scripts, tokens and store identifiers are removed. -->
+<html><head><meta charset="utf-8"></head><body>
+<!-- product-form-component form[action*='/cart/add'] .quantity-selector -->
+<quantity-selector-component class="quantity-selector">
+    <button class="button quantity-minus button-unstyled" type="button" name="minus">
+      <span class="visually-hidden">Decrease quantity</span><span class="svg-wrapper icon-plus">
+</span>
+    </button>
+    <input type="number" name="quantity" value="1" data-cart-quantity="1" min="1" data-min="1" aria-label="Quantity" step="1">
+    <button class="button quantity-plus button-unstyled" type="button" name="plus">
+      <span class="visually-hidden">Increase quantity</span><span class="svg-wrapper icon-plus">
+</span>
+    </button>
+  </quantity-selector-component>
+<!-- .cart-drawer .cart-items__quantity -->
+<td class="cart-items__quantity" role="cell" headers="quantity">
+                  <div class="cart-items__quantity-controls">
+<div class="quantity-selector-wrapper">
+  <cart-quantity-selector-component class="quantity-selector cart-primary-typography">
+    <button class="button quantity-minus button-unstyled" type="button" name="minus">
+      <span class="visually-hidden">Decrease quantity</span><span class="svg-wrapper icon-plus">
+</span>
+    </button>
+    <input type="number" name="updates[]" value="1" data-cart-quantity="1" min="1" data-min="1" aria-label="Quantity" data-cart-line="1" step="1">
+    <button class="button quantity-plus button-unstyled" type="button" name="plus">
+      <span class="visually-hidden">Increase quantity</span><span class="svg-wrapper icon-plus">
+</span>
+    </button>
+  </cart-quantity-selector-component></div>
+                    <button class="button button--tertiary cart-items__remove" type="button" aria-label="Remove Alex Merino Wool Open Placket Polo - Ivory / XS">
+<span class="visually-hidden">Remove</span>
+                    </button>
+                  </div>
+                </td>
+<!-- .cart-drawer .cart__ctas -->
+<div class="cart__ctas">
+  <button type="submit" id="checkout" class="cart__checkout-button button" name="checkout" form="cart-form">
+    Check out
+  </button>
+    <div class="
+        additional-checkout-buttons
+      ">
+      <div class="dynamic-checkout__content" id="dynamic-checkout-cart" data-shopify="dynamic-checkout-cart"> <shopify-accelerated-checkout-cart requires-shipping=""> <div class="wallet-button-wrapper"> <ul class="wallet-cart-grid wallet-cart-grid--skeleton" role="list" data-shopify-buttoncontainer="true"> <li class="wallet-cart-button-container"><div class="wallet-cart-button wallet-cart-button__skeleton" role="button" disabled="" aria-hidden="true">&nbsp;</div></li><li class="wallet-cart-button-container"><div class="wallet-cart-button wallet-cart-button__skeleton" role="button" disabled="" aria-hidden="true">&nbsp;</div></li> </ul> </div> </shopify-accelerated-checkout-cart> </div>
+    </div>
+</div>
+</body></html>

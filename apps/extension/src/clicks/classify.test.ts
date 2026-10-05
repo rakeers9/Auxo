@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { classifyClick, classifySubmit, MAX_DEPTH, MAX_LABEL_LENGTH } from "./classify";
-import { EXCLUDED_PHRASES, GUESS_PHRASES, guessFromAction, normalize } from "./guess";
+import { EDIT_INTENTS, EXCLUDED_PHRASES, GUESS_PHRASES, guessFromAction, normalize } from "./guess";
 import type { ClickIntent } from "./known";
 
 const SHOP = new URL("https://shop.example.com/products/lamp");
@@ -72,18 +72,47 @@ describe("classifyClick guesses", () => {
     },
   );
 
-  it.each(EXCLUDED_PHRASES)("excludes look-alike %j", (phrase) => {
+  it.each(EXCLUDED_PHRASES)("look-alike %j is never a buy intent", (phrase) => {
     html(`<button>${phrase}</button><button aria-label="${phrase}">Add to cart</button>`);
-    for (const b of document.querySelectorAll("button")) expect(classifyClick(b, SHOP)).toBeNull();
+    for (const b of document.querySelectorAll("button")) {
+      const intent = classifyClick(b, SHOP)?.intent;
+      if (intent !== undefined) expect(EDIT_INTENTS.has(intent), intent).toBe(true);
+    }
   });
 
-  it.each(["Add to wishlist", "Add to Wish List", "Add to list", "Add to registry", "Save for later", "Remove from cart", "Delete"])(
-    "excludes %j",
+  it.each(["Add to wishlist", "Add to Wish List", "Add to list", "Add to registry", "Move to wishlist"])(
+    "%j is neither a buy intent nor a cart edit",
     (text) => {
       html(`<button>${text}</button>`);
       expect(classifyClick(el("button"), SHOP)).toBeNull();
     },
   );
+
+  it.each([
+    ["Save for later", "save_for_later"],
+    ["Remove from cart", "remove_item"],
+    ["Remove", "remove_item"],
+    ["Delete", "remove_item"],
+    ["delete item", "remove_item"],
+  ] as const)("%j is a cart edit (%s), never a buy intent", (text, intent) => {
+    html(`<button>${text}</button>`);
+    expect(classifyClick(el("button"), SHOP)).toEqual({ intent, source: "guess", label: text });
+  });
+
+  it("a control labeled both 'Add to cart' and 'Remove' is remove_item, not add_to_cart", () => {
+    html('<button aria-label="Remove">Add to cart</button>');
+    expect(classifyClick(el("button"), SHOP)?.intent).toBe("remove_item");
+  });
+
+  it("+/− and 'Increase/Decrease quantity' are not guessed (product pages use them for how many to add)", () => {
+    html("<button>+</button><button>−</button><button>Increase quantity</button><button>Decrease quantity</button>");
+    for (const b of document.querySelectorAll("button")) expect(classifyClick(b, SHOP)).toBeNull();
+  });
+
+  it("an edit phrase still needs the whole label", () => {
+    html("<button>Remove filters</button><button>Delete account</button><button>Save for later reading</button>");
+    for (const b of document.querySelectorAll("button")) expect(classifyClick(b, SHOP)).toBeNull();
+  });
 
   it("a nav link whose only text is a number is not a guess", () => {
     html('<a href="/cart"><span class="count">3</span></a>');
@@ -206,6 +235,17 @@ describe("classifySubmit", () => {
   it("an excluded submitter beats the form action", () => {
     html('<form action="/cart/add"><button type="submit">Add to wishlist</button></form>');
     expect(classifySubmit(el("form") as HTMLFormElement, el("button"), SHOP)).toBeNull();
+  });
+
+  it("a Remove / Save for later submitter is a cart edit, even in a /cart/add form", () => {
+    html('<form action="/cart/add"><button type="submit" class="r">Remove</button><button type="submit" class="s">Save for later</button></form>');
+    const form = el("form") as HTMLFormElement;
+    expect(classifySubmit(form, el(".r"), SHOP)).toEqual({ intent: "remove_item", source: "guess", label: "Remove" });
+    expect(classifySubmit(form, el(".s"), SHOP)).toEqual({
+      intent: "save_for_later",
+      source: "guess",
+      label: "Save for later",
+    });
   });
 
   it("returns null for an unrelated form", () => {

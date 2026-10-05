@@ -37,7 +37,61 @@ export const KNOWN_CONTROLS: Record<string, KnownControl[]> = {
     // Every page: the nav cart link. amazon-added-to-cart.html (/cart/smart-wagon):
     // span#sw-gtc wraps the "Go to Cart" link, which has no id.
     { intent: "view_cart", selectors: ["#nav-cart", "#sw-gtc"] },
+
+    // Cart edits. The quantity stepper is the same in the cart sidebar
+    // (#nav-flyout-ewc in amazon-product*.html, amazon-added-to-cart.html) and
+    // on the cart page (amazon-cart*.html). At quantity 1 the − button shows a
+    // trash icon and deletes the item, so remove_item is listed before
+    // decrease_qty and keys on that icon.
+    {
+      intent: "remove_item",
+      selectors: [
+        '[data-action="a-stepper"] [data-action="a-stepper-decrement"]:has(.a-icon-small-trash)',
+        // Cart page "Delete" (active items only). Not data-feature-id
+        // "item-delete-button": the saved-for-later list's Delete shares it.
+        'input[name="submit.delete-active"]',
+        'span[data-action="delete-active"]',
+      ],
+    },
+    { intent: "decrease_qty", selectors: ['[data-action="a-stepper"] [data-action="a-stepper-decrement"]'] },
+    { intent: "increase_qty", selectors: ['[data-action="a-stepper"] [data-action="a-stepper-increment"]'] },
+    // Cart page "Save for later". The sidebar has no such control.
+    {
+      intent: "save_for_later",
+      selectors: [
+        'input[name="submit.save-for-later"]',
+        '[data-feature-id="save-for-later-action"]',
+        'span[data-action="save-for-later"]',
+      ],
+    },
   ],
+};
+
+// Controls that look like a cart edit or buy intent by their text but aren't,
+// so they classify as nothing instead of falling through to a guess. Same
+// fixture rule. Amazon (amazon-cart-saved-item.html): "Delete" on a saved-for-
+// later item removes it from the saved list, not from the cart.
+export const KNOWN_IGNORED: Record<string, string[]> = {
+  "www.amazon.com": ['input[name="submit.delete-saved"]', '[data-action="delete-saved"]'],
+};
+
+// Whether `start` sits in an ignored control for this host.
+export function isIgnored(start: Element, url: URL): boolean {
+  return (KNOWN_IGNORED[url.hostname] ?? []).some((selector) => {
+    try {
+      return start.closest(selector) !== null;
+    } catch {
+      return false;
+    }
+  });
+}
+
+// Quantity fields whose `change` is a cart edit (see classifyChange). Same
+// fixture rule as KNOWN_CONTROLS. Amazon: the typed quantity box beside the
+// stepper, in the sidebar and on the cart page. Not select#quantity on the
+// product page: that sets how many to add, it doesn't edit the cart.
+export const KNOWN_QUANTITY_FIELDS: Record<string, string[]> = {
+  "www.amazon.com": ['input[name="quantityBox"]'],
 };
 
 // Platforms whose standard storefront markup is the same on every host.
@@ -62,14 +116,51 @@ export const PLATFORM_CONTROLS: Record<Platform, KnownControl[]> = {
     // Links to Shopify's /cart route (header icon, "View cart"). Drawer themes
     // (Horizon's product page) use a button instead, left to guesses.
     { intent: "view_cart", selectors: ['a[href="/cart"]'] },
+
+    // Cart edits on a cart line, in the cart page and the cart drawer (Dawn,
+    // Horizon, Death Wish Coffee; Horizon's drawer in horizon-drawer-buttons).
+    // The +/− buttons sit beside the line's updates[] quantity input; keying
+    // on that keeps out the product form's own +/− (how many to add), which
+    // has no updates[] input.
+    { intent: "increase_qty", selectors: [':has(> input[name="updates[]"]) > button[name="plus"]'] },
+    { intent: "decrease_qty", selectors: [':has(> input[name="updates[]"]) > button[name="minus"]'] },
+    // Remove: Shopify's /cart/change route with quantity=0 (Dawn, Death Wish),
+    // and Horizon's remove button.
+    {
+      intent: "remove_item",
+      selectors: ['a[href*="/cart/change"][href*="quantity=0"]', "button.cart-items__remove"],
+    },
   ],
 };
+
+// Platform quantity fields whose `change` is a cart edit: the cart line's
+// updates[] input, Shopify's standard cart form field. All three themes.
+export const PLATFORM_QUANTITY_FIELDS: Record<Platform, string[]> = {
+  shopify: ['input[name="updates[]"]'],
+};
+
+// The quantity field selectors for a host, plus the platform's.
+export function quantityFieldsFor(host: string, platform?: Platform): string[] {
+  const hostFields = KNOWN_QUANTITY_FIELDS[host] ?? [];
+  const platformFields = platform ? (PLATFORM_QUANTITY_FIELDS[platform] ?? []) : [];
+  return [...hostFields, ...platformFields];
+}
 
 // Per-intent selector lists from store config (StoreOverrides.buttons). A
 // given intent's list replaces the bundled list for that intent.
 export type ButtonOverrides = Partial<Record<ClickIntent, string[]>>;
 
-const CLICK_INTENTS: readonly ClickIntent[] = ["add_to_cart", "buy_now", "view_cart", "checkout", "place_order"];
+const CLICK_INTENTS: readonly ClickIntent[] = [
+  "add_to_cart",
+  "buy_now",
+  "view_cart",
+  "checkout",
+  "place_order",
+  "increase_qty",
+  "decrease_qty",
+  "remove_item",
+  "save_for_later",
+];
 
 // The known controls for a host: its bundled defaults, then the platform's
 // controls, with any overrides applied. An overridden intent's list replaces

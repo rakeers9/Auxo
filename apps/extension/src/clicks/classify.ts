@@ -1,6 +1,6 @@
 import type { ClickSignal } from "../messages";
-import { guessFromAction, guessIntent, isExcluded } from "./guess";
-import { matchKnown, type ButtonOverrides, type ClickIntent, type Platform } from "./known";
+import { EDIT_INTENTS, guessFromAction, guessIntent, isExcluded } from "./guess";
+import { isIgnored, matchKnown, quantityFieldsFor, type ButtonOverrides, type ClickIntent, type Platform } from "./known";
 
 // How far up from the click target to look for the control. Clicks usually
 // land on an inner span or img a few levels down.
@@ -23,6 +23,7 @@ export function classifyClick(
 
   const known = matchKnown(start, url, buttons, platform);
   if (known) return signal(known.intent, "known", labelOf(known.element));
+  if (isIgnored(start, url)) return null;
 
   const control = findControl(start);
   return control ? guessFromLabels(control) : null;
@@ -40,9 +41,11 @@ export function classifySubmit(
   if (submitter) {
     const known = matchKnown(submitter, url, buttons, platform);
     if (known) return signal(known.intent, "known", labelOf(known.element));
-    if (labelsOf(submitter).some(isExcluded)) return null;
+    if (isIgnored(submitter, url)) return null;
     const guessed = guessFromLabels(submitter);
     if (guessed) return guessed;
+    // A look-alike submitter also rules out guessing from the form action.
+    if (labelsOf(submitter).some(isExcluded)) return null;
   }
 
   const action = submitter?.getAttribute("formaction") ?? form.getAttribute("action");
@@ -55,6 +58,68 @@ export function classifySubmit(
   }
   const intent = guessFromAction(pathname);
   return intent ? signal(intent, "guess", submitter ? labelOf(submitter) : "") : null;
+}
+
+// Classifies a `change` on a known cart quantity field (a <select> or a number
+// input): up is increase_qty, down is decrease_qty, 0 or a delete option is
+// remove_item. Anything else, including unknown fields, is null.
+// `_buttons` keeps the call shape the same as classifyClick; store config has
+// no key for quantity fields yet, so it isn't used.
+export function classifyChange(
+  target: EventTarget | null,
+  url: URL,
+  _buttons?: ButtonOverrides,
+  platform?: Platform,
+): ClickSignal | null {
+  const field = toElement(target);
+  if (!field || (field.tagName !== "SELECT" && field.tagName !== "INPUT")) return null;
+  const known = quantityFieldsFor(url.hostname, platform).some((selector) => {
+    try {
+      return field.matches(selector);
+    } catch {
+      return false;
+    }
+  });
+  if (!known) return null;
+  const intent = quantityChangeIntent(field);
+  return intent ? signal(intent, "known", labelOf(field)) : null;
+}
+
+// Which way a quantity field moved, from its original value (the option
+// marked selected in the HTML, or the input's value attribute) to its current
+// one. Exported for tests.
+export function quantityChangeIntent(field: Element): "increase_qty" | "decrease_qty" | "remove_item" | null {
+  let before: number;
+  let after: number;
+  if (field.tagName === "SELECT") {
+    const select = field as HTMLSelectElement;
+    const options = [...select.options];
+    // The `selected` attribute is what defaultSelected reflects; reading it
+    // directly also works where defaultSelected isn't implemented (happy-dom).
+    const original = options.find((option) => option.hasAttribute("selected")) ?? options[0];
+    const chosen = options[select.selectedIndex];
+    if (!original || !chosen) return null;
+    if (/\b(delete|remove)\b/i.test(chosen.text)) return "remove_item";
+    before = parseQuantity(original.value);
+    after = parseQuantity(chosen.value);
+  } else if (field.tagName === "INPUT") {
+    const input = field as HTMLInputElement;
+    // Amazon also keeps the old value on the stepper's wrapper.
+    const original = input.defaultValue || (input.closest("[data-old-value]")?.getAttribute("data-old-value") ?? "");
+    before = parseQuantity(original);
+    after = parseQuantity(input.value);
+  } else {
+    return null;
+  }
+  if (after === 0) return "remove_item";
+  if (Number.isNaN(before) || Number.isNaN(after) || after === before) return null;
+  return after > before ? "increase_qty" : "decrease_qty";
+}
+
+// Leading digits of a quantity value ("3", "10+"); NaN when there are none.
+function parseQuantity(value: string): number {
+  const match = /^\s*(\d+)/.exec(value);
+  return match?.[1] ? Number.parseInt(match[1], 10) : Number.NaN;
 }
 
 // The nearest actionable control at or above `start`, within MAX_DEPTH.
@@ -76,12 +141,14 @@ function isActionable(el: Element): boolean {
   return false;
 }
 
+// A look-alike label (wishlist, remove, ...) rules out every buy intent, but
+// not the cart edits: "Remove" is never add_to_cart, and is remove_item.
 function guessFromLabels(control: Element): ClickSignal | null {
   const labels = labelsOf(control);
-  if (labels.some(isExcluded)) return null;
+  const excluded = labels.some(isExcluded);
   for (const label of labels) {
     const intent = guessIntent(label);
-    if (intent) return signal(intent, "guess", label);
+    if (intent && (!excluded || EDIT_INTENTS.has(intent))) return signal(intent, "guess", label);
   }
   return null;
 }

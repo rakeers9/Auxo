@@ -35,6 +35,33 @@ function find(doc: Document, selector: string): Element {
   return el;
 }
 
+// In the cart sidebar (#nav-flyout-ewc) only the quantity stepper counts: +
+// is increase_qty, − is decrease_qty, or remove_item when it shows the trash
+// icon (quantity 1). Every other control (product links, the close button,
+// the quantity box on click) classifies as nothing, and never as a buy intent.
+function expectSidebarOnlyEdits(doc: Document, url: URL): void {
+  const controls = [...find(doc, "#nav-flyout-ewc").querySelectorAll("button, a, input, [role=button]")];
+  expect(controls.length).toBeGreaterThan(0);
+  let steppers = 0;
+  for (const control of controls) {
+    const action = control.getAttribute("data-action");
+    const expected =
+      action === "a-stepper-increment"
+        ? "increase_qty"
+        : action === "a-stepper-decrement"
+          ? control.querySelector(".a-icon-small-trash")
+            ? "remove_item"
+            : "decrease_qty"
+          : null;
+    if (expected) steppers++;
+    const result = classifyClick(control, url);
+    const where = control.outerHTML.slice(0, 120);
+    if (expected) expect(result, where).toMatchObject({ intent: expected, source: "known" });
+    else expect(result, where).toBeNull();
+  }
+  expect(steppers).toBeGreaterThan(0);
+}
+
 describe("known Amazon controls, against real fixtures", () => {
   it("every known selector exists in at least one real fixture", () => {
     const docs = Object.values(FIXTURES).map(parse);
@@ -91,13 +118,8 @@ describe("known Amazon controls, against real fixtures", () => {
       expect(classifyClick(find(doc, "span#productTitle"), PRODUCT_URL)).toBeNull();
     });
 
-    it("controls in the nav cart flyout are not product actions", () => {
-      const flyout = find(doc, "#nav-flyout-ewc");
-      const controls = [...flyout.querySelectorAll("button, a, input, [role=button]")];
-      expect(controls.length).toBeGreaterThan(0);
-      for (const control of controls) {
-        expect(classifyClick(control, PRODUCT_URL), control.outerHTML.slice(0, 120)).toBeNull();
-      }
+    it("controls in the cart sidebar are cart edits or nothing, never buy intents", () => {
+      expectSidebarOnlyEdits(doc, PRODUCT_URL);
     });
   });
 
@@ -158,12 +180,8 @@ describe("known Amazon controls, against real fixtures", () => {
       expect(classifyClick(find(doc, "#nav-cart"), ADDED_URL)).toMatchObject({ intent: "view_cart", source: "known" });
     });
 
-    it("controls in the nav cart flyout are not buy-intent clicks", () => {
-      const controls = [...find(doc, "#nav-flyout-ewc").querySelectorAll("button, a, input, [role=button]")];
-      expect(controls.length).toBeGreaterThan(0);
-      for (const control of controls) {
-        expect(classifyClick(control, ADDED_URL), control.outerHTML.slice(0, 120)).toBeNull();
-      }
+    it("controls in the cart sidebar are cart edits or nothing, never buy intents", () => {
+      expectSidebarOnlyEdits(doc, ADDED_URL);
     });
 
     it("off Amazon, Go to Cart is only a guess", () => {

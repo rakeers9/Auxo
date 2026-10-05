@@ -5,6 +5,7 @@ import dawnProductHtml from "../cart/__fixtures__/shopify/dawn-product-buttons.h
 import deathwishCartHtml from "../cart/__fixtures__/shopify/deathwish-cart-buttons.html?raw";
 import deathwishProductHtml from "../cart/__fixtures__/shopify/deathwish-product-buttons.html?raw";
 import horizonCartHtml from "../cart/__fixtures__/shopify/horizon-cart-buttons.html?raw";
+import horizonDrawerHtml from "../cart/__fixtures__/shopify/horizon-drawer-buttons.html?raw";
 import horizonProductHtml from "../cart/__fixtures__/shopify/horizon-product-buttons.html?raw";
 import { classifyClick, classifySubmit } from "./classify";
 import { controlsFor, PLATFORM_CONTROLS } from "./known";
@@ -21,7 +22,7 @@ const CART_PAGES = {
   horizon: horizonCartHtml,
   deathwish: deathwishCartHtml,
 };
-const ALL_PAGES = [...Object.values(PRODUCT_PAGES), ...Object.values(CART_PAGES)];
+const ALL_PAGES = [...Object.values(PRODUCT_PAGES), ...Object.values(CART_PAGES), horizonDrawerHtml];
 
 const STORE = new URL("https://some-store.example/products/mug");
 const CART = new URL("https://some-store.example/cart");
@@ -46,9 +47,9 @@ describe("Shopify platform controls, against real theme HTML", () => {
     }
   });
 
-  it("covers add_to_cart, buy_now, checkout, and view_cart", () => {
+  it("covers the buy intents and the cart edits Shopify has controls for", () => {
     expect(PLATFORM_CONTROLS.shopify.map((c) => c.intent).sort()).toEqual(
-      ["add_to_cart", "buy_now", "checkout", "view_cart"].sort(),
+      ["add_to_cart", "buy_now", "checkout", "view_cart", "increase_qty", "decrease_qty", "remove_item"].sort(),
     );
   });
 
@@ -218,7 +219,16 @@ describe("Shopify controls with host overrides", () => {
 
   it("merging keeps one list per intent, in the platform's order", () => {
     const merged = controlsFor("some-store.example", { checkout: ["#co"], place_order: ["#po"] }, "shopify");
-    expect(merged.map((c) => c.intent)).toEqual(["buy_now", "add_to_cart", "checkout", "view_cart", "place_order"]);
+    expect(merged.map((c) => c.intent)).toEqual([
+      "buy_now",
+      "add_to_cart",
+      "checkout",
+      "view_cart",
+      "increase_qty",
+      "decrease_qty",
+      "remove_item",
+      "place_order",
+    ]);
     expect(merged.find((c) => c.intent === "checkout")?.selectors).toEqual(["#co"]);
   });
 });

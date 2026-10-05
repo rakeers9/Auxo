@@ -21,15 +21,27 @@ export const GUESS_PHRASES: Record<ClickIntent, string[]> = {
   ],
   checkout: ["checkout", "check out", "proceed to checkout", "continue to checkout", "go to checkout", "secure checkout"],
   place_order: ["place order", "place your order", "complete purchase", "complete order", "pay now", "submit order"],
-  // Cart edits: no guesses yet, only known store controls (auxo-8f, AUX-25).
+  // Cart edits. Only whole, unambiguous phrases. No +/− guesses: product
+  // pages use the same "Increase/Decrease quantity" buttons for how many to
+  // add (Horizon), which isn't a cart edit; a bare "+"/"−" normalizes to "".
+  // "remove", "delete" and "save for later" stay EXCLUDED_PHRASES for the buy
+  // intents above.
   increase_qty: [],
   decrease_qty: [],
-  remove_item: [],
-  save_for_later: [],
+  remove_item: ["remove", "delete", "remove item", "delete item", "remove from cart", "remove from bag"],
+  save_for_later: ["save for later"],
 };
 
+// The cart edits, as opposed to buy intents.
+export const EDIT_INTENTS: ReadonlySet<ClickIntent> = new Set<ClickIntent>([
+  "increase_qty",
+  "decrease_qty",
+  "remove_item",
+  "save_for_later",
+]);
+
 // Look-alikes. If any of a control's labels contains one of these, it is not
-// a buy-intent control, whatever else it says.
+// a buy-intent control, whatever else it says. Edit intents ignore this list.
 export const EXCLUDED_PHRASES = [
   "wishlist",
   "wish list",

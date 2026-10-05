@@ -12,4 +12,30 @@
                   Check out
                 </button>
               </div>
+<!-- #CartItem-1 .cart-item__quantity -->
+<td class="cart-item__quantity">
+                      <quantity-popover>
+                        <div class="cart-item__quantity-wrapper quantity-popover-wrapper">
+                          <label class="visually-hidden" for="Quantity-1">
+                            Quantity
+                          </label>
+                          <div class="quantity-popover-container"><quantity-input class="quantity cart-quantity">
+                              <button class="quantity__button" name="minus" type="button">
+                                <span class="visually-hidden">Decrease quantity for Puff</span>
+                              </button>
+                              <input class="quantity__input" data-quantity-variant-id="1" type="number" name="updates[]" value="1" data-cart-quantity="1" min="0" data-min="1" step="1" aria-label="Quantity for Puff" id="Quantity-1" data-index="1">
+                              <button class="quantity__button" name="plus" type="button">
+                                <span class="visually-hidden">Increase quantity for Puff</span>
+                              </button>
+                            </quantity-input>
+                          </div>
+                          <cart-remove-button id="Remove-1" data-index="1">
+                            <a href="/cart/change?id=1:0&amp;quantity=0" class="button button--tertiary" aria-label="Remove Puff - Chocolate">
+                            </a>
+                          </cart-remove-button>
+                        </div><div class="cart-item__error" id="Line-item-error-1" role="alert">
+                          <small class="cart-item__error-text"></small>
+                        </div>
+                      </quantity-popover>
+                    </td>
 </body></html>
