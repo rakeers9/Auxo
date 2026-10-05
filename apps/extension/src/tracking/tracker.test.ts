@@ -145,6 +145,23 @@ describe("createTracker", () => {
     expect(next.pending.takeClick()).toBeNull();
   });
 
+  it("saves a navigating click before any network read finishes", async () => {
+    const pending = createPendingStore(sessionStorage);
+    let resolveInspect!: (p: PageInspection) => void;
+    const tracker = createTracker({
+      flow: { check: vi.fn(), lastDecision: () => null },
+      pending,
+      inspect: () => new Promise<PageInspection>((resolve) => (resolveInspect = resolve)),
+      sendEvent: () => {},
+      now: () => NOW,
+    });
+
+    void tracker.onBuyIntent(signal("buy_now"));
+    // Saved synchronously, while the network read is still pending.
+    expect(pending.takeClick()?.signal.intent).toBe("buy_now");
+    resolveInspect({ pageType: "product", draft: null, problems: [] });
+  });
+
   it("does not use up the remembered click on in-page changes", async () => {
     const t = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
     await t.tracker.onBuyIntent(signal("buy_now"));

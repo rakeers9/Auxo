@@ -1,7 +1,7 @@
 import type { DecisionEvent } from "@auxo/shared";
 
 import type { CartFlow, CartFlowOutcome } from "../flow";
-import type { CartDraft, ClickSignal, PageInspection } from "../messages";
+import type { CartDraft, ClickSignal, PageInspection, PageType } from "../messages";
 import { buildDecisionEvent } from "./events";
 import type { PendingClick, PendingStore } from "./pending";
 import { removedItems } from "./removal";
@@ -15,7 +15,7 @@ export type TrackerNote =
 export interface TrackerDeps {
   flow: CartFlow;
   pending: PendingStore;
-  inspect(): PageInspection;
+  inspect(): PageInspection | Promise<PageInspection>;
   sendEvent(event: DecisionEvent): void;
   now?: () => Date;
   // Reports what happened, for the debug panel.
@@ -65,7 +65,7 @@ export function createTracker(deps: TrackerDeps): Tracker {
     onLoad: () => run(deps.pending.takeClick()),
 
     async onPageChange() {
-      const inspection = deps.inspect();
+      const inspection = await deps.inspect();
       if (baseline && inspection.draft && inspection.pageType !== "other") {
         const removed = removedItems(baseline.draft, inspection.draft);
         if (removed.length > 0) {
@@ -92,7 +92,12 @@ export function createTracker(deps: TrackerDeps): Tracker {
     async onBuyIntent(signal) {
       const at = now();
       note({ kind: "click", signal, at });
-      const pageType = deps.inspect().pageType;
+      // Everything before the first await runs while the click is still being
+      // handled, i.e. before the page can navigate away. A DOM reader answers
+      // synchronously; a network reader (Shopify) can't, so its page type is
+      // only known for add to cart, which waits anyway.
+      const syncInspection = deps.inspect();
+      const pageType: PageType = syncInspection instanceof Promise ? "other" : syncInspection.pageType;
       const click = { signal, pageType, at: at.toISOString() };
 
       if (signal.intent === "place_order") {
@@ -104,9 +109,14 @@ export function createTracker(deps: TrackerDeps): Tracker {
         return null;
       }
 
-      if (signal.intent === "add_to_cart" && pageType === "product") return run(click);
+      if (signal.intent !== "add_to_cart") {
+        deps.pending.saveClick(click);
+        return null;
+      }
 
-      deps.pending.saveClick(click);
+      const inspected = await syncInspection;
+      if (inspected.pageType === "product") return run({ ...click, pageType: inspected.pageType });
+      deps.pending.saveClick({ ...click, pageType: inspected.pageType });
       return null;
     },
   };

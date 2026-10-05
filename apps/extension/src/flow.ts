@@ -8,7 +8,9 @@ import type { PendingClick } from "./tracking/pending";
 export const CONTENT_TIMEOUT_MS = 3_000;
 
 export interface CartFlowDeps {
-  inspect(): PageInspection;
+  // Sync for DOM readers (Amazon); async for stores read over the network
+  // (Shopify's /cart.js).
+  inspect(): PageInspection | Promise<PageInspection>;
   hash(draft: CartDraft): Promise<string>;
   requestVerdict(cart: Cart, trigger: Trigger): Promise<DecideResult>;
   show(verdict: Verdict): void;
@@ -57,7 +59,7 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
   return {
     lastDecision: () => last,
     async check(click) {
-      const inspection = deps.inspect();
+      const inspection = await deps.inspect();
       const pageType = inspection.pageType;
 
       if (pageType === "other") return { status: "skipped", pageType, reason: "not_shopping_page" };
