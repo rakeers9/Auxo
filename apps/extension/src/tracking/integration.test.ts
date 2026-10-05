@@ -390,3 +390,87 @@ describe("changes made outside this tab", () => {
     expect(await state.compareAtLoad("amazon.com", cartOf([mugs]))).toBeNull();
   });
 });
+
+describe("real sidebar saves: before and after each action", () => {
+  const url = new URL("https://www.amazon.com/gp/cart/view.html");
+  const body = (name: string) =>
+    new DOMParser().parseFromString(readFileSync(resolve(FIXTURES, name), "utf8"), "text/html").body.innerHTML;
+
+  async function watchReal(beforeFixture: string) {
+    vi.useFakeTimers();
+    const { readAmazonMiniCart } = await import("../cart");
+    const { watchMiniCart, MINI_CART_DEBOUNCE_MS } = await import("./sidesheet");
+    document.body.innerHTML = body(beforeFixture);
+    const decided: Array<{ cart: { items: unknown[] }; trigger: Trigger }> = [];
+    const events: DecisionEvent[] = [];
+    const handler = createMiniCartHandler({
+      decisionFor: async () => null,
+      sendEvent: (e) => events.push(e),
+      decide: async (cart, trigger) => {
+        decided.push({ cart, trigger });
+        return "44444444-4444-4444-8444-444444444444";
+      },
+      pageType: () => "other",
+    });
+    const stop = watchMiniCart(document, () => readAmazonMiniCart(document, url).draft, {
+      onChange: (before, after, diff) => void handler.onChange(before, after, diff),
+    });
+    const settle = async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(MINI_CART_DEBOUNCE_MS);
+      await vi.runAllTimersAsync();
+    };
+    return { handler, decided, events, settle, stop };
+  }
+
+  it("+ in the real sidebar (qty 1 → 2) is asked about as increase_qty", async () => {
+    const w = await watchReal("amazon-sidebar-before.html");
+    const plus = document.querySelector('#nav-flyout-ewc [data-action="a-stepper-increment"]');
+    const signal = classifyClick(plus, new URL("https://www.amazon.com/dp/B0TEST0009"));
+    expect(signal).toMatchObject({ intent: "increase_qty", source: "known" });
+    w.handler.noteEditClick(signal!);
+
+    document.body.innerHTML = body("amazon-sidebar-after-plus.html");
+    await w.settle();
+
+    expect(w.decided).toHaveLength(1);
+    expect(w.decided[0]!.trigger).toMatchObject({ intent: "increase_qty", source: "known" });
+    expect(w.decided[0]!.cart.items).toEqual([expect.objectContaining({ price_minor: 1199, qty: 1 })]);
+    w.stop();
+    vi.useRealTimers();
+  });
+
+  it("− in the real sidebar (qty 2 → 1) is asked about as decrease_qty and sends 'removed'", async () => {
+    const w = await watchReal("amazon-sidebar-after-plus.html");
+    const minus = document.querySelector('#nav-flyout-ewc [data-action="a-stepper-decrement"]');
+    const signal = classifyClick(minus, new URL("https://www.amazon.com/dp/B0TEST0009"));
+    expect(signal).toMatchObject({ intent: "decrease_qty", source: "known" });
+    w.handler.noteEditClick(signal!);
+
+    document.body.innerHTML = body("amazon-sidebar-after-minus.html");
+    await w.settle();
+
+    expect(w.decided[0]!.trigger).toMatchObject({ intent: "decrease_qty", source: "known" });
+    expect(w.events[0]).toMatchObject({ action: "removed", metadata: { precursor_decision_id: null } });
+    w.stop();
+    vi.useRealTimers();
+  });
+
+  it("deleting the last item (trash) in the real sidebar is asked about as remove_item", async () => {
+    const w = await watchReal("amazon-sidebar-before-delete-last.html");
+    const trash = document.querySelector('#nav-flyout-ewc [data-action="a-stepper-decrement"]');
+    const signal = classifyClick(trash, new URL("https://www.amazon.com/dp/B0TEST0010"));
+    expect(signal).toMatchObject({ intent: "remove_item", source: "known" });
+    w.handler.noteEditClick(signal!);
+
+    document.body.innerHTML = body("amazon-sidebar-after-delete-last.html");
+    await w.settle();
+
+    expect(w.decided).toHaveLength(1);
+    expect(w.decided[0]!.trigger).toMatchObject({ intent: "remove_item", source: "known" });
+    expect(w.decided[0]!.cart.items).toEqual([expect.objectContaining({ price_minor: 1699, qty: 1 })]);
+    expect(w.events[0]).toMatchObject({ action: "removed", metadata: { after_total_minor: 0 } });
+    w.stop();
+    vi.useRealTimers();
+  });
+});
