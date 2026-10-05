@@ -1,4 +1,4 @@
-import type { Cart, DecisionEvent, StoreOverrides, Trigger, TriggerIntent, Verdict } from "@auxo/shared";
+import type { Cart, CartItem, DecisionEvent, StoreOverrides, Trigger, TriggerIntent, Verdict } from "@auxo/shared";
 
 // Content script -> background worker: ask the API for a verdict on this cart.
 export interface DecideMessage {
@@ -101,4 +101,40 @@ export interface ConfigResult {
 export interface WishlistSaveMessage {
   type: "auxo:wishlist-save";
   decisionId: string;
+}
+
+// Content script -> worker: this tab saw this cart and already reported any
+// change in it, so the worker just remembers it (src/api/cart-state.ts).
+// `items` may be empty: a cart can be emptied.
+export interface CartRecordMessage {
+  type: "auxo:cart-record";
+  merchant: string;
+  cart: CartDraft;
+}
+
+// Content script -> worker: the cart read on a fresh page load. The worker
+// compares it with the last cart it knows for this merchant, which catches
+// changes made in another tab or outside Auxo (e.g. the store's app).
+export interface CartLoadMessage {
+  type: "auxo:cart-load";
+  merchant: string;
+  cart: CartDraft;
+}
+
+export interface CartChange {
+  before: CartDraft;
+  after: CartDraft;
+  diff: {
+    // Items gone or with a lower quantity, at the price they had before.
+    removed: CartItem[];
+    // Items new or with a higher quantity, at their current price.
+    added: CartItem[];
+    // Items still in the cart at a new unit price. Information only: not a
+    // removal or an add.
+    repriced: Array<{ name: string; before_minor: number; after_minor: number }>;
+  };
+}
+
+export interface CartLoadResult {
+  change: CartChange | null;
 }

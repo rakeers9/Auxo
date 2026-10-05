@@ -1,6 +1,7 @@
 import { CartSchema, DecisionEventSchema, TriggerSchema, type Cart, type DecisionEvent, type Trigger } from "@auxo/shared";
 
-import type { DecideResult, EventResult } from "../messages";
+import type { CartDraft, DecideResult, EventResult } from "../messages";
+import { parseCartDraft } from "./cart-state";
 
 export function isDecideMessage(message: unknown): message is { type: "auxo:decide"; cart: unknown; trigger?: unknown } {
   return typeof message === "object" && message !== null && (message as { type?: unknown }).type === "auxo:decide";
@@ -100,4 +101,24 @@ export function isWishlistSaveMessage(message: unknown): message is { type: "aux
     (message as { type?: unknown }).type === "auxo:wishlist-save" &&
     typeof (message as { decisionId?: unknown }).decisionId === "string"
   );
+}
+
+// auxo:cart-record / auxo:cart-load: a non-empty merchant and a whole cart
+// (items may be empty; each item has a name and safe-integer price and qty).
+export function isCartRecordMessage(
+  message: unknown,
+): message is { type: "auxo:cart-record"; merchant: string; cart: CartDraft } {
+  return isCartMessage(message, "auxo:cart-record");
+}
+
+export function isCartLoadMessage(
+  message: unknown,
+): message is { type: "auxo:cart-load"; merchant: string; cart: CartDraft } {
+  return isCartMessage(message, "auxo:cart-load");
+}
+
+function isCartMessage(message: unknown, type: string): boolean {
+  if (typeof message !== "object" || message === null) return false;
+  const m = message as { type?: unknown; merchant?: unknown; cart?: unknown };
+  return m.type === type && typeof m.merchant === "string" && m.merchant.trim() !== "" && parseCartDraft(m.cart) !== null;
 }

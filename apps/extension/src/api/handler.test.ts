@@ -6,6 +6,8 @@ import {
   handleDecideMessage,
   handleEventMessage,
   isAckMessage,
+  isCartLoadMessage,
+  isCartRecordMessage,
   isClaimMessage,
   isConfigMessage,
   isDecideMessage,
@@ -186,5 +188,45 @@ describe("isWishlistSaveMessage", () => {
     expect(isWishlistSaveMessage({ type: "auxo:wishlist-save", decisionId: "x" })).toBe(true);
     expect(isWishlistSaveMessage({ type: "auxo:wishlist-save" })).toBe(false);
     expect(isWishlistSaveMessage({ type: "auxo:ack", decisionId: "x" })).toBe(false);
+  });
+});
+
+describe("cart state messages", () => {
+  const draft = {
+    merchant: "amazon.com",
+    items: [{ name: "Desk lamp", price_minor: 2499, qty: 1 }],
+    total_minor: 2499,
+    currency: "USD",
+    url: "https://www.amazon.com/gp/cart/view.html",
+  };
+
+  it("accepts a whole cart, including an emptied one", () => {
+    expect(isCartLoadMessage({ type: "auxo:cart-load", merchant: "amazon.com", cart: draft })).toBe(true);
+    expect(isCartRecordMessage({ type: "auxo:cart-record", merchant: "amazon.com", cart: draft })).toBe(true);
+    const empty = { ...draft, items: [], total_minor: 0 };
+    expect(isCartLoadMessage({ type: "auxo:cart-load", merchant: "amazon.com", cart: empty })).toBe(true);
+  });
+
+  it("tells the two types apart", () => {
+    expect(isCartLoadMessage({ type: "auxo:cart-record", merchant: "amazon.com", cart: draft })).toBe(false);
+    expect(isCartRecordMessage({ type: "auxo:cart-load", merchant: "amazon.com", cart: draft })).toBe(false);
+  });
+
+  it.each([
+    ["no merchant", { merchant: undefined }],
+    ["a blank merchant", { merchant: "  " }],
+    ["no cart", { cart: undefined }],
+    ["a cart with a hash", { cart: { ...draft, cart_hash: "0".repeat(64) } }],
+    ["a fractional price", { cart: { ...draft, items: [{ name: "Desk lamp", price_minor: 24.99, qty: 1 }] } }],
+    ["a zero quantity", { cart: { ...draft, items: [{ name: "Desk lamp", price_minor: 2499, qty: 0 }] } }],
+    ["an unsafe quantity", { cart: { ...draft, items: [{ name: "Desk lamp", price_minor: 2499, qty: 2 ** 53 }] } }],
+    ["a nameless item", { cart: { ...draft, items: [{ name: "", price_minor: 2499, qty: 1 }] } }],
+  ])("rejects %s", (_label, change) => {
+    expect(isCartLoadMessage({ type: "auxo:cart-load", merchant: "amazon.com", cart: draft, ...change })).toBe(false);
+  });
+
+  it("rejects non-objects", () => {
+    expect(isCartLoadMessage(null)).toBe(false);
+    expect(isCartRecordMessage("auxo:cart-record")).toBe(false);
   });
 });
