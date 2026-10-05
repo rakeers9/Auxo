@@ -28,6 +28,22 @@ describe("inspectPage", () => {
     expect(result.problems.length).toBe(1);
   });
 
+  it("recognizes each checkout step by its path", () => {
+    document.documentElement.innerHTML = "<body></body>";
+    for (const step of ["address", "pay", "spc"]) {
+      const result = inspectPage(document, new URL(`https://www.amazon.com/checkout/p/p-000-0000000-0000000/${step}?ref=x`));
+      expect(result.pageType).toBe("checkout");
+      expect(result.draft).toBeNull();
+      expect(result.details).toEqual({ "checkout step": step });
+    }
+  });
+
+  it("does not treat other hosts or paths as checkout", () => {
+    document.documentElement.innerHTML = "<body></body>";
+    expect(inspectPage(document, new URL("https://example.com/checkout/p/p-1/address")).pageType).toBe("other");
+    expect(inspectPage(document, new URL("https://www.amazon.com/checkout-help")).pageType).toBe("other");
+  });
+
   it("treats a product page as 'other'", () => {
     load("amazon-product.html");
     const result = inspectPage(document, new URL("https://www.amazon.com/dp/B0TEST0001"));
