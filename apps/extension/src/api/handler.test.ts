@@ -7,6 +7,7 @@ import {
   handleEventMessage,
   isAckMessage,
   isClaimMessage,
+  isConfigMessage,
   isDecideMessage,
   isDecisionForMessage,
   isEventMessage,
@@ -168,5 +169,13 @@ describe("isDecisionForMessage", () => {
     expect(isDecisionForMessage({ type: "auxo:decision-for", items: [{ name: 1, price_minor: 999 }] })).toBe(false);
     expect(isDecisionForMessage({ type: "auxo:decision-for" })).toBe(false);
     expect(isDecisionForMessage(null)).toBe(false);
+  });
+});
+
+describe("isConfigMessage", () => {
+  it("needs a host", () => {
+    expect(isConfigMessage({ type: "auxo:config", host: "www.amazon.com" })).toBe(true);
+    expect(isConfigMessage({ type: "auxo:config" })).toBe(false);
+    expect(isConfigMessage({ type: "auxo:claim" })).toBe(false);
   });
 });

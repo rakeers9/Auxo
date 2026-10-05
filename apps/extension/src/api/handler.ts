@@ -83,3 +83,12 @@ export function isDecisionForMessage(
     )
   );
 }
+
+export function isConfigMessage(message: unknown): message is { type: "auxo:config"; host: string } {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    (message as { type?: unknown }).type === "auxo:config" &&
+    typeof (message as { host?: unknown }).host === "string"
+  );
+}

@@ -8,6 +8,7 @@ import {
   handleEventMessage,
   isAckMessage,
   isClaimMessage,
+  isConfigMessage,
   isDecideMessage,
   isDecisionForMessage,
   isEventMessage,
@@ -15,8 +16,9 @@ import {
 } from "../src/api/handler";
 import { createDecisionMemory } from "../src/api/decision-memory";
 import { createHandoff } from "../src/api/handoff";
+import { createConfigCache, fetchStoreConfig, overridesFor } from "../src/api/store-config";
 import { API_BASE_URL } from "../src/config";
-import type { ClaimResult, DecisionForResult } from "../src/messages";
+import type { ClaimResult, ConfigResult, DecisionForResult } from "../src/messages";
 
 export default defineBackground(() => {
   // Holds add-to-cart answers across page changes in a tab.
@@ -27,6 +29,11 @@ export default defineBackground(() => {
     set: (items) => browser.storage.session.set(items),
   });
   browser.tabs.onRemoved.addListener((tabId) => handoff.forget(tabId));
+  // Store selectors and on/off switches from the backend (data, not code).
+  const config = createConfigCache({
+    load: () => fetchStoreConfig({ baseUrl: API_BASE_URL }),
+    area: { get: (key) => browser.storage.local.get(key), set: (items) => browser.storage.local.set(items) },
+  });
 
   // All API calls happen here, so CORS only has to allow the extension origin.
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -52,6 +59,10 @@ export default defineBackground(() => {
     }
     if (isDecisionForMessage(message)) {
       void memory.decisionFor(message.items).then((decisionId) => sendResponse({ decisionId } satisfies DecisionForResult));
+      return true;
+    }
+    if (isConfigMessage(message)) {
+      void config.get().then((c) => sendResponse({ overrides: overridesFor(c, message.host) } satisfies ConfigResult));
       return true;
     }
     if (isClaimMessage(message)) {

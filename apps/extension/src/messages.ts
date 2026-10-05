@@ -1,4 +1,4 @@
-import type { Cart, DecisionEvent, Trigger, TriggerIntent, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, StoreOverrides, Trigger, TriggerIntent, Verdict } from "@auxo/shared";
 
 // Content script -> background worker: ask the API for a verdict on this cart.
 export interface DecideMessage {
@@ -83,4 +83,15 @@ export interface DecisionForMessage {
 
 export interface DecisionForResult {
   decisionId: string | null;
+}
+
+// Content script -> worker, on page load: the backend's overrides for this
+// store (selectors, buttons, on/off), or null to use the bundled defaults.
+export interface ConfigMessage {
+  type: "auxo:config";
+  host: string;
+}
+
+export interface ConfigResult {
+  overrides: StoreOverrides | null;
 }

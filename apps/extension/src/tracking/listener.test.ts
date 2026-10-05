@@ -104,6 +104,86 @@ describe("listenForBuyIntents", () => {
     expect(onSignal).toHaveBeenCalledTimes(2);
   });
 
+  it("stops a click the gate blocks: the page never sees it, and nothing is replayed", () => {
+    document.body.innerHTML = '<a id="buy" href="#go"><span id="inner">Place your order</span></a>';
+    const onSignal = vi.fn<(s: ClickSignal) => void>();
+    const onBlocked = vi.fn<(s: ClickSignal) => void>();
+    const place: ClickSignal = { intent: "place_order", source: "known", label: "Place your order" };
+    const pageHandler = vi.fn();
+    document.getElementById("buy")!.addEventListener("click", pageHandler);
+    stop = listenForBuyIntents(
+      document,
+      { classifyClick: () => place, classifySubmit: () => null },
+      onSignal,
+      () => URL_,
+      () => 0,
+      { shouldBlock: () => true, onBlocked },
+    );
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    document.getElementById("inner")!.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(pageHandler).not.toHaveBeenCalled();
+    expect(onBlocked).toHaveBeenCalledWith(place);
+    expect(onSignal).not.toHaveBeenCalled();
+  });
+
+  it("lets the click through untouched when the gate allows it", () => {
+    document.body.innerHTML = '<button id="b">Place your order</button>';
+    const onSignal = vi.fn<(s: ClickSignal) => void>();
+    const pageHandler = vi.fn();
+    document.getElementById("b")!.addEventListener("click", pageHandler);
+    const place: ClickSignal = { intent: "place_order", source: "known" };
+    stop = listenForBuyIntents(document, { classifyClick: () => place, classifySubmit: () => null }, onSignal, () => URL_, () => 0, {
+      shouldBlock: () => false,
+      onBlocked: vi.fn(),
+    });
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    document.getElementById("b")!.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(pageHandler).toHaveBeenCalledTimes(1);
+    expect(onSignal).toHaveBeenCalledWith(place);
+  });
+
+  it("never blocks when the gate throws", () => {
+    document.body.innerHTML = '<button id="b">Buy</button>';
+    const pageHandler = vi.fn();
+    document.getElementById("b")!.addEventListener("click", pageHandler);
+    stop = listenForBuyIntents(
+      document,
+      { classifyClick: () => ({ intent: "buy_now", source: "known" }), classifySubmit: () => null },
+      vi.fn(),
+      () => URL_,
+      () => 0,
+      {
+        shouldBlock: () => {
+          throw new Error("bug");
+        },
+        onBlocked: vi.fn(),
+      },
+    );
+
+    document.getElementById("b")!.click();
+    expect(pageHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("a blocked submit button doesn't submit its form", () => {
+    document.body.innerHTML = '<form id="f"><input id="go" type="submit" value="Proceed to checkout"></form>';
+    const submitted = vi.fn((event: Event) => event.preventDefault());
+    document.getElementById("f")!.addEventListener("submit", submitted);
+    const checkout: ClickSignal = { intent: "checkout", source: "known" };
+    stop = listenForBuyIntents(document, { classifyClick: () => checkout, classifySubmit: () => checkout }, vi.fn(), () => URL_, () => 0, {
+      shouldBlock: () => true,
+      onBlocked: vi.fn(),
+    });
+
+    document.getElementById("go")!.click();
+    expect(submitted).not.toHaveBeenCalled();
+  });
+
   it("swallows classifier and handler errors", () => {
     const { onSignal } = setup({
       classifyClick: () => {

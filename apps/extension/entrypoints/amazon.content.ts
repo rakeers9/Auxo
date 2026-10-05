@@ -1,4 +1,4 @@
-import type { Cart, DecisionEvent, Trigger, UserAction, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, StoreOverrides, Trigger, UserAction, Verdict } from "@auxo/shared";
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 import {
@@ -15,8 +15,10 @@ import type {
   AckMessage,
   ClaimMessage,
   ClaimResult,
-  ClickSignal,
   CartDraft,
+  ClickSignal,
+  ConfigMessage,
+  ConfigResult,
   DecideMessage,
   DecideResult,
   DecisionForMessage,
@@ -130,6 +132,22 @@ export default defineContentScript({
         onRemove: (panel) => panel?.destroy(),
       });
       debugUi.mount();
+    }
+
+    // The backend's overrides for this store. If it can't be reached in time,
+    // the bundled selectors are used. A store switched off does nothing.
+    const overrides: StoreOverrides | null = await Promise.race([
+      browser.runtime
+        .sendMessage<ConfigMessage, ConfigResult>({ type: "auxo:config", host: location.hostname })
+        .then((r) => r.overrides)
+        .catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), CONTENT_TIMEOUT_MS)),
+    ]);
+    if (overrides?.enabled === false) {
+      note = `Auxo is switched off for ${location.hostname} by the backend config`;
+      refreshDebug();
+      ctx.onInvalidated(() => debugUi?.remove());
+      return;
     }
 
     const record = (outcome: CartFlowOutcome) => {
