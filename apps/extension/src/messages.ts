@@ -38,7 +38,7 @@ export type EventResult =
 // What the extension read from a page, for the dev debug panel. `problems`
 // explains in plain English why `draft` is null.
 export interface PageInspection {
-  pageType: "cart" | "checkout" | "other";
+  pageType: "product" | "cart" | "checkout" | "other";
   draft: CartDraft | null;
   problems: string[];
   details?: Record<string, string>;

@@ -91,7 +91,7 @@ export default defineContentScript({
 
     const run = createCartFlow({
       // Cart page and every checkout step (Buy Now skips the cart).
-      isCartPage: () => inspectAmazonPage(document, new URL(location.href)).pageType !== "other",
+      isCartPage: () => ["cart", "checkout"].includes(inspectAmazonPage(document, new URL(location.href)).pageType),
       extract: () => inspectAmazonPage(document, new URL(location.href)).draft,
       hash: hashCart,
       requestVerdict: (cart) =>
