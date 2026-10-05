@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import addedToCartHtml from "../cart/__fixtures__/amazon-added-to-cart.html?raw";
 import cartSavedItemHtml from "../cart/__fixtures__/amazon-cart-saved-item.html?raw";
 import cartHtml from "../cart/__fixtures__/amazon-cart.html?raw";
 import checkoutBuyNowHtml from "../cart/__fixtures__/amazon-checkout-buy-now.html?raw";
@@ -13,12 +14,14 @@ const FIXTURES = {
   product: productHtml,
   cart: cartHtml,
   cartSavedItem: cartSavedItemHtml,
+  addedToCart: addedToCartHtml,
   checkoutBuyNow: checkoutBuyNowHtml,
   checkoutFromCart: checkoutFromCartHtml,
 };
 
 const PRODUCT_URL = new URL("https://www.amazon.com/side-table/dp/B0TEST0005");
 const CART_URL = new URL("https://www.amazon.com/gp/cart/view.html");
+const ADDED_URL = new URL("https://www.amazon.com/cart/smart-wagon?newItems=abc,1&ref_=sw_refresh");
 const CHECKOUT_URL = new URL("https://www.amazon.com/checkout/p/p-123/spc");
 const OTHER_HOST = new URL("https://www.amazon.co.uk/side-table/dp/B0TEST0005");
 
@@ -112,6 +115,62 @@ describe("known Amazon controls, against real fixtures", () => {
       expect(classifyClick(find(doc, "#sc-buy-box-ptc-button-announce"), CART_URL)).toMatchObject({
         intent: "checkout",
         source: "known",
+      });
+    });
+  });
+
+  describe("added-to-cart page (/cart/smart-wagon)", () => {
+    const doc = parse(addedToCartHtml);
+
+    it("Go to Cart (the link or its inner span) is known view_cart", () => {
+      const link = find(doc, "#sw-gtc a");
+      expect(link.getAttribute("href")).toBe("https://www.amazon.com/cart?ref_=sw_gtc");
+      expect(classifyClick(link, ADDED_URL)).toEqual({ intent: "view_cart", source: "known", label: "Go to Cart" });
+      expect(classifyClick(find(doc, "#sw-gtc .a-button-inner"), ADDED_URL)).toMatchObject({
+        intent: "view_cart",
+        source: "known",
+      });
+    });
+
+    it("Proceed to checkout (input or inner span) is known checkout", () => {
+      expect(classifyClick(find(doc, 'input[name="proceedToRetailCheckout"]'), ADDED_URL)).toEqual({
+        intent: "checkout",
+        source: "known",
+        label: "Proceed to checkout",
+      });
+      expect(classifyClick(find(doc, "#sc-buy-box-ptc-button-announce"), ADDED_URL)).toMatchObject({
+        intent: "checkout",
+        source: "known",
+      });
+    });
+
+    it("submitting the checkout form with that button is known checkout", () => {
+      const submitter = find(doc, 'input[name="proceedToRetailCheckout"]');
+      const form = submitter.closest("form");
+      expect(form).not.toBeNull();
+      expect(classifySubmit(form as HTMLFormElement, submitter, ADDED_URL)).toMatchObject({
+        intent: "checkout",
+        source: "known",
+      });
+    });
+
+    it("the nav cart link is still known view_cart", () => {
+      expect(classifyClick(find(doc, "#nav-cart"), ADDED_URL)).toMatchObject({ intent: "view_cart", source: "known" });
+    });
+
+    it("controls in the nav cart flyout are not buy-intent clicks", () => {
+      const controls = [...find(doc, "#nav-flyout-ewc").querySelectorAll("button, a, input, [role=button]")];
+      expect(controls.length).toBeGreaterThan(0);
+      for (const control of controls) {
+        expect(classifyClick(control, ADDED_URL), control.outerHTML.slice(0, 120)).toBeNull();
+      }
+    });
+
+    it("off Amazon, Go to Cart is only a guess", () => {
+      expect(classifyClick(find(doc, "#sw-gtc a"), OTHER_HOST)).toEqual({
+        intent: "view_cart",
+        source: "guess",
+        label: "Go to Cart",
       });
     });
   });

@@ -34,8 +34,9 @@ export const KNOWN_CONTROLS: Record<string, KnownControl[]> = {
     },
     // amazon-checkout-*.html: span#submitOrderButtonId wraps the place order control.
     { intent: "place_order", selectors: ["#submitOrderButtonId"] },
-    // Every page: the nav cart link.
-    { intent: "view_cart", selectors: ["#nav-cart"] },
+    // Every page: the nav cart link. amazon-added-to-cart.html (/cart/smart-wagon):
+    // span#sw-gtc wraps the "Go to Cart" link, which has no id.
+    { intent: "view_cart", selectors: ["#nav-cart", "#sw-gtc"] },
   ],
 };
 
