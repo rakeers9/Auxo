@@ -8,7 +8,8 @@ import {
 
 import { extractAmazonCart, hashCart, isAmazonCartPage } from "../src/cart";
 import { createCartFlow } from "../src/flow";
-import type { DecideMessage, DecideResult, ExitAction } from "../src/messages";
+import { buildExitEvent } from "../src/api/events";
+import type { DecideMessage, DecideResult, EventMessage, EventResult, ExitAction } from "../src/messages";
 import { renderOverlay, type OverlayHandle } from "../src/overlay";
 import { watchForChanges } from "../src/watch";
 
@@ -24,10 +25,17 @@ export default defineContentScript({
       ui = null;
     };
 
-    const onExit = (action: ExitAction) => {
-      // Phase 2 posts this to /v1/events. For now the overlay just gets out of the way.
-      console.info("[Auxo] exit", action);
+    // Every exit is logged (design invariant: every override is recorded).
+    // The event is built once, so a retry would reuse its event_id.
+    const onExit = (verdict: Verdict, action: ExitAction) => {
       removeOverlay();
+      const event = buildExitEvent(verdict.decision_id, action);
+      void browser.runtime
+        .sendMessage<EventMessage, EventResult>({ type: "auxo:event", event })
+        .then((result) => {
+          if (!result.ok) console.info("[Auxo] exit not recorded:", result.reason);
+        })
+        .catch(() => console.info("[Auxo] exit not recorded: worker unavailable"));
     };
 
     const show = async (verdict: Verdict) => {
@@ -38,7 +46,8 @@ export default defineContentScript({
         name: "auxo-overlay",
         position: "inline",
         anchor: "body",
-        onMount: (container) => renderOverlay(container, verdict, { onExit }),
+        onMount: (container) =>
+          renderOverlay(container, verdict, { onExit: (action) => onExit(verdict, action) }),
         onRemove: (handle) => handle?.destroy(),
       });
       if (ctx.isInvalid) return;
