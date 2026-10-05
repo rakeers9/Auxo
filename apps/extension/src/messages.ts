@@ -1,4 +1,4 @@
-import type { Cart, DecisionEvent, Verdict } from "@auxo/shared";
+import type { Cart, DecisionEvent, TriggerIntent, Verdict } from "@auxo/shared";
 
 // Content script -> background worker: ask the API for a verdict on this cart.
 export interface DecideMessage {
@@ -42,4 +42,12 @@ export interface PageInspection {
   draft: CartDraft | null;
   problems: string[];
   details?: Record<string, string>;
+}
+
+// A buy-intent click or form submit, as classified by src/clicks.
+// known: a store button verified on real pages; guess: generic signals.
+export interface ClickSignal {
+  intent: Exclude<TriggerIntent, "page_view">;
+  source: "known" | "guess";
+  label?: string;
 }
