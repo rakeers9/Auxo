@@ -1,6 +1,6 @@
 import type { Cart, Trigger, TriggerPageType, Verdict } from "@auxo/shared";
 
-import type { CartDraft, DecideFailureReason, DecideResult, PageInspection } from "./messages";
+import type { CartDraft, DecideFailureReason, DecideResult, PageInspection, PageType } from "./messages";
 import type { PendingClick } from "./tracking/pending";
 
 // The worker's own API timeout is 2.5s; this guards against the worker never
@@ -17,8 +17,8 @@ export interface CartFlowDeps {
 }
 
 export type CartFlowOutcome =
-  | { status: "skipped"; pageType: TriggerPageType; reason: "not_shopping_page" | "product_without_click" }
-  | { status: "unreadable"; pageType: TriggerPageType; problems: string[] }
+  | { status: "skipped"; pageType: PageType; reason: "not_shopping_page" | "product_without_click" | "added_to_cart_page" }
+  | { status: "unreadable"; pageType: PageType; problems: string[] }
   | { status: "unchanged"; pageType: TriggerPageType; draft: CartDraft; cartHash: string }
   | {
       status: "failed_open";
@@ -61,6 +61,9 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
       const pageType = inspection.pageType;
 
       if (pageType === "other") return { status: "skipped", pageType, reason: "not_shopping_page" };
+      // The add to cart that led here was already decided at the click; its
+      // answer is handed over by the worker, not asked again.
+      if (pageType === "added_to_cart") return { status: "skipped", pageType, reason: "added_to_cart_page" };
       if (pageType === "product" && click?.signal.intent !== "add_to_cart") {
         return { status: "skipped", pageType, reason: "product_without_click" };
       }

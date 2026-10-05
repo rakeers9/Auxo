@@ -90,6 +90,17 @@ describe("createCartFlow", () => {
     expect(d.requestVerdict).not.toHaveBeenCalled();
   });
 
+  it("doesn't ask again on the added-to-cart page (the click was already decided)", async () => {
+    const d = deps({ inspect: () => page("added_to_cart") });
+
+    expect(await createCartFlow(d.deps).check(click("view_cart"))).toEqual({
+      status: "skipped",
+      pageType: "added_to_cart",
+      reason: "added_to_cart_page",
+    });
+    expect(d.requestVerdict).not.toHaveBeenCalled();
+  });
+
   it("only asks on a product page after an add-to-cart click", async () => {
     const d = deps({ inspect: () => page("product") });
     const flow = createCartFlow(d.deps);

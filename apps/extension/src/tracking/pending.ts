@@ -1,6 +1,4 @@
-import type { TriggerPageType } from "@auxo/shared";
-
-import type { CartDraft, ClickSignal } from "../messages";
+import type { CartDraft, ClickSignal, PageType } from "../messages";
 
 // A buy-intent click usually loads a new page, so it's remembered in the
 // tab's sessionStorage (same origin, same tab, cleared when the tab closes)
@@ -12,7 +10,7 @@ const PURCHASE_KEY = "auxo:pending-purchase";
 export interface PendingClick {
   signal: ClickSignal;
   // The page the click happened on.
-  pageType: TriggerPageType;
+  pageType: PageType;
   at: string;
 }
 

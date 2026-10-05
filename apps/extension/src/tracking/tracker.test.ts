@@ -1,4 +1,4 @@
-import type { DecisionEvent, Verdict } from "@auxo/shared";
+import type { DecisionEvent, TriggerPageType, Verdict } from "@auxo/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CartFlow, CartFlowOutcome, LastDecision } from "../flow";
@@ -31,15 +31,17 @@ function setup(initial: PageInspection) {
   let last: LastDecision | null = null;
   const check = vi.fn<CartFlow["check"]>(async () => {
     const draft = inspection.draft!;
-    const outcome: CartFlowOutcome = {
-      status: "shown",
-      pageType: inspection.pageType,
+    // The fake only decides on pages the real flow decides on.
+    const pageType = inspection.pageType as TriggerPageType;
+    const outcome = {
+      status: "shown" as const,
+      pageType,
       draft,
       cartHash: "h",
-      trigger: { intent: "page_view", source: "page", page_type: inspection.pageType, occurred_at: NOW.toISOString() },
+      trigger: { intent: "page_view" as const, source: "page" as const, page_type: pageType, occurred_at: NOW.toISOString() },
       verdict: verdict("2b9ebefe-78c8-561e-9a68-da51842c65a8"),
-    };
-    last = { decisionId: outcome.verdict.decision_id, draft, cartHash: "h", pageType: inspection.pageType };
+    } satisfies CartFlowOutcome;
+    last = { decisionId: outcome.verdict.decision_id, draft, cartHash: "h", pageType };
     return outcome;
   });
   const flow: CartFlow = { check, lastDecision: () => last };

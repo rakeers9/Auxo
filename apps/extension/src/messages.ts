@@ -36,10 +36,14 @@ export type EventResult =
   | { ok: true; duplicate: boolean }
   | { ok: false; reason: EventFailureReason };
 
+// The kinds of page the readers recognize. added_to_cart is Amazon's
+// "Added to cart" page (/cart/smart-wagon) that follows an add to cart.
+export type PageType = "product" | "cart" | "checkout" | "added_to_cart" | "other";
+
 // What the extension read from a page, for the dev debug panel. `problems`
 // explains in plain English why `draft` is null.
 export interface PageInspection {
-  pageType: "product" | "cart" | "checkout" | "other";
+  pageType: PageType;
   draft: CartDraft | null;
   problems: string[];
   details?: Record<string, string>;
