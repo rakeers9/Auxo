@@ -21,6 +21,11 @@ export const GUESS_PHRASES: Record<ClickIntent, string[]> = {
   ],
   checkout: ["checkout", "check out", "proceed to checkout", "continue to checkout", "go to checkout", "secure checkout"],
   place_order: ["place order", "place your order", "complete purchase", "complete order", "pay now", "submit order"],
+  // Cart edits: no guesses yet, only known store controls (auxo-8f, AUX-25).
+  increase_qty: [],
+  decrease_qty: [],
+  remove_item: [],
+  save_for_later: [],
 };
 
 // Look-alikes. If any of a control's labels contains one of these, it is not
