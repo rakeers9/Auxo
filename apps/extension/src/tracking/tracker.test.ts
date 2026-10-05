@@ -213,6 +213,20 @@ describe("createTracker", () => {
     });
   });
 
+  it("reports everything as removed when the cart page empties (last item deleted)", async () => {
+    const t = setup(cartPage([mug, lamp]));
+    await t.tracker.onLoad();
+
+    t.setPage({ pageType: "cart", draft: { ...draftOf([]), total_minor: 0 }, problems: [] });
+    await t.tracker.onPageChange();
+
+    expect(t.sent).toHaveLength(1);
+    expect(t.sent[0]).toMatchObject({
+      action: "removed",
+      metadata: { removed: [mug, lamp], before_total_minor: 6396, after_total_minor: 0 },
+    });
+  });
+
   it("doesn't report removals before any decision, or for additions", async () => {
     const t = setup(cartPage([mug]));
     await t.tracker.onPageChange();
