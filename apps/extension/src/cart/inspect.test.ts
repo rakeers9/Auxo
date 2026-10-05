@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { extractAmazonCart } from "./amazon";
 import { extractAmazonCheckout } from "./checkout";
 import { inspectAmazonPage } from "./inspect";
+import { extractAmazonProduct } from "./product";
 import buyNowCheckoutHtml from "./__fixtures__/amazon-checkout-buy-now.html?raw";
 import fromCartCheckoutHtml from "./__fixtures__/amazon-checkout-from-cart.html?raw";
 // Sanitized copies of real amazon.com pages (product names and IDs replaced).
@@ -156,12 +157,62 @@ describe("inspectAmazonPage on checkout pages", () => {
   });
 });
 
+describe("inspectAmazonPage on product pages", () => {
+  function productWith(change: (doc: Document) => void): Document {
+    const doc = parse(productHtml);
+    change(doc);
+    return doc;
+  }
+  const buyBoxPrice = (d: Document) => d.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")!;
+  const quantity = (d: Document) => d.querySelector<HTMLSelectElement>("form#addToCart select#quantity")!;
+
+  it("reports the same draft extractAmazonProduct returns, with raw readings", () => {
+    const doc = parse(productHtml);
+    const inspection = inspectAmazonPage(doc, PRODUCT_URL);
+    expect(inspection.pageType).toBe("product");
+    expect(inspection.problems).toEqual([]);
+    expect(inspection.draft).toEqual(extractAmazonProduct(doc, PRODUCT_URL));
+    expect(inspection.details).toEqual({
+      asin: "B0TEST0005",
+      "buy box price": '"$45.98"',
+      "page price": "$45.98",
+      qty: '"1"',
+      "items sum": "$45.98",
+    });
+  });
+
+  it.each<[string, (d: Document) => void, string]>([
+    ["a missing buy box price", (d) => buyBoxPrice(d).remove(), "no price in the buy box"],
+    ["an unreadable buy box price", (d) => { buyBoxPrice(d).textContent = "See options"; }, 'buy box price "See options" isn\'t a readable price'],
+    ["prices that disagree", (d) => { buyBoxPrice(d).textContent = "$44.98"; }, "buy box price $44.98 but the page shows $45.98"],
+    ["a missing quantity dropdown", (d) => quantity(d).remove(), "no quantity dropdown in the buy box"],
+    [
+      "a quantity that isn't a number",
+      (d) => {
+        const option = d.createElement("option");
+        option.value = "31+";
+        quantity(d).append(option);
+        quantity(d).value = "31+";
+      },
+      'quantity "31+" isn\'t a positive whole number',
+    ],
+    ["a missing title", (d) => { d.querySelector("span#productTitle")!.textContent = ""; }, "no product title (span#productTitle)"],
+  ])("explains %s", (_label, change, problem) => {
+    const doc = productWith(change);
+    const inspection = inspectAmazonPage(doc, PRODUCT_URL);
+    expect(inspection.pageType).toBe("product");
+    expect(inspection.draft).toBeNull();
+    expect(inspection.problems).toEqual([problem]);
+    expect(extractAmazonProduct(doc, PRODUCT_URL)).toBeNull();
+  });
+});
+
 describe("inspectAmazonPage on other pages", () => {
-  it("says a product page is neither cart nor checkout", () => {
-    expect(inspectAmazonPage(parse(productHtml), PRODUCT_URL)).toEqual({
+  it("says an Amazon page that isn't a product, cart, or checkout is other", () => {
+    expect(inspectAmazonPage(parse(productHtml), new URL("https://www.amazon.com/s?k=lamp"))).toEqual({
       pageType: "other",
       draft: null,
-      problems: ["not a cart or checkout page"],
+      problems: ["not a product, cart, or checkout page"],
     });
   });
 

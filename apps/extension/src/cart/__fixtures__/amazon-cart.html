@@ -45,9 +45,9 @@ Subtotal (6 items):</span><span id="sc-subtotal-amount-buybox" class="sc-price-c
 <div id="payment-options-placeholder" class="a-section payment-options-placeholder"></div>
 <span id="desktop-ptc-button-celWidget" class="celwidget">
 <span id="desktop-ptc-button-" class="celwidget">
-<span id="sc-buy-box-ptc-button" class="a-button a-button-normal a-button-span12 a-button-primary sc-buy-box-ptc-button"><span class="a-button-inner"><input name="proceedToRetailCheckout" class="a-button-input" type="submit"><span id="sc-buy-box-ptc-button-announce" class="a-button-text" aria-hidden="true">
+<span id="sc-buy-box-ptc-button" class="a-button a-button-normal a-button-span12 a-button-primary sc-buy-box-ptc-button"><span class="a-button-inner"><input name="proceedToRetailCheckout" data-feature-id="proceed-to-checkout-action" class="a-button-input" type="submit" value="Proceed to checkout"><span id="sc-buy-box-ptc-button-announce" class="a-button-text" aria-hidden="true">
 <div class="a-section a-spacing-none">
-<div class="sc-without-multicart"></div>
+<div class="sc-without-multicart" data-feature-id="proceed-to-checkout-label"></div>
 <div class="sc-with-multicart"></div>
 </div>
 </span></span></span>
@@ -133,17 +133,17 @@ Subtotal (6 items):</span><span id="sc-subtotal-amount-buybox" class="sc-price-c
 <span class="sc-quantity-stepper">
 <fieldset name="sc-quantity" class="a-declarative a-stepper-expanding-fieldset" data-steppervalue="3" data-action="a-stepper"><legend class="a-offscreen" aria-hidden="true">Quantity is 3</legend><div></div><div class="a-stepper-inner-container"><div class="a-stepper-controls"><button class="a-declarative" data-action="a-stepper-decrement" data-a-selector="decrement"><span data-a-selector="decrement-icon" class="a-icon a-icon-small-remove"></span></button><div class="a-declarative" data-a-selector="spinbutton" data-action="a-stepper-spinbutton"><span data-a-selector="spinner"><span class="a-spinner a-spinner-small"></span><span class="a-offscreen"></span></span><span data-a-selector="value"><span data-a-selector="inner-value">3</span></span></div><div class="a-offscreen a-stepper-live-region"><div class="a-stepper-value-live">3</div></div><button data-a-selector="increment" class="a-declarative" data-action="a-stepper-increment"><span data-a-selector="increment-icon" class="a-icon a-icon-small-add"></span></button></div></div></fieldset>
 </span>
-<div class="a-input-text-addon-group-wrapper"><div class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
+<div class="a-input-text-addon-group-wrapper"><div data-feature-id="sc-quantity-textfield-input-group" class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
 <span class="a-input-text-addon">Qty:</span>
 <input type="number" value="3" name="quantityBox" class="a-input-text sc-quantity-textfield">
 </div></div>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" class="a-size-small sc-action-delete-active">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" data-feature-id="delete-active" class="a-size-small sc-action-delete-active">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.delete-active" data-action="delete-active" type="submit" class="a-color-link">
+<input name="submit.delete-active" value="Delete" data-action="delete-active" type="submit" class="a-color-link" data-feature-id="item-delete-button">
 </span>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" class="a-size-small sc-action-save-for-later">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" data-feature-id="save-for-later" class="a-size-small sc-action-save-for-later">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.save-for-later" data-action="save-for-later" type="submit" class="a-color-link">
+<input name="submit.save-for-later" value="Save for later" data-action="save-for-later" type="submit" class="a-color-link" data-feature-id="save-for-later-action">
 </span>
 </span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i>
 </div>
@@ -188,17 +188,17 @@ Subtotal (6 items):</span><span id="sc-subtotal-amount-buybox" class="sc-price-c
 <span class="sc-quantity-stepper">
 <fieldset name="sc-quantity" class="a-declarative a-stepper-expanding-fieldset" data-steppervalue="1" data-action="a-stepper"><legend class="a-offscreen" aria-hidden="true">Quantity is 1</legend><div></div><div class="a-stepper-inner-container"><div class="a-stepper-controls"><button class="a-declarative" data-action="a-stepper-decrement" data-a-selector="decrement"><span data-a-selector="decrement-icon" class="a-icon a-icon-small-trash"></span></button><div class="a-declarative" data-a-selector="spinbutton" data-action="a-stepper-spinbutton"><span data-a-selector="spinner"><span class="a-spinner a-spinner-small"></span><span class="a-offscreen"></span></span><span data-a-selector="value"><span data-a-selector="inner-value">1</span></span></div><div class="a-offscreen a-stepper-live-region"><div class="a-stepper-value-live">1</div></div><button data-a-selector="increment" class="a-declarative" data-action="a-stepper-increment"><span data-a-selector="increment-icon" class="a-icon a-icon-small-add"></span></button></div></div></fieldset>
 </span>
-<div class="a-input-text-addon-group-wrapper"><div class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
+<div class="a-input-text-addon-group-wrapper"><div data-feature-id="sc-quantity-textfield-input-group" class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
 <span class="a-input-text-addon">Qty:</span>
 <input type="number" value="1" name="quantityBox" class="a-input-text sc-quantity-textfield">
 </div></div>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" class="a-size-small sc-action-delete-active">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" data-feature-id="delete-active" class="a-size-small sc-action-delete-active">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.delete-active" data-action="delete-active" type="submit" class="a-color-link">
+<input name="submit.delete-active" value="Delete" data-action="delete-active" type="submit" class="a-color-link" data-feature-id="item-delete-button">
 </span>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" class="a-size-small sc-action-save-for-later">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" data-feature-id="save-for-later" class="a-size-small sc-action-save-for-later">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.save-for-later" data-action="save-for-later" type="submit" class="a-color-link">
+<input name="submit.save-for-later" value="Save for later" data-action="save-for-later" type="submit" class="a-color-link" data-feature-id="save-for-later-action">
 </span>
 </span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i>
 </div>
@@ -245,17 +245,17 @@ Subtotal (6 items):</span><span id="sc-subtotal-amount-buybox" class="sc-price-c
 <span class="sc-quantity-stepper">
 <fieldset name="sc-quantity" class="a-declarative a-stepper-expanding-fieldset" data-steppervalue="1" data-action="a-stepper"><legend class="a-offscreen" aria-hidden="true">Quantity is 1</legend><div></div><div class="a-stepper-inner-container"><div class="a-stepper-controls"><button class="a-declarative" data-action="a-stepper-decrement" data-a-selector="decrement"><span data-a-selector="decrement-icon" class="a-icon a-icon-small-trash"></span></button><div class="a-declarative" data-a-selector="spinbutton" data-action="a-stepper-spinbutton"><span data-a-selector="spinner"><span class="a-spinner a-spinner-small"></span><span class="a-offscreen"></span></span><span data-a-selector="value"><span data-a-selector="inner-value">1</span></span></div><div class="a-offscreen a-stepper-live-region"><div class="a-stepper-value-live">1</div></div><button data-a-selector="increment" class="a-declarative" data-action="a-stepper-increment"><span data-a-selector="increment-icon" class="a-icon a-icon-small-add"></span></button></div></div></fieldset>
 </span>
-<div class="a-input-text-addon-group-wrapper"><div class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
+<div class="a-input-text-addon-group-wrapper"><div data-feature-id="sc-quantity-textfield-input-group" class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
 <span class="a-input-text-addon">Qty:</span>
 <input type="number" value="1" name="quantityBox" class="a-input-text sc-quantity-textfield">
 </div></div>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" class="a-size-small sc-action-delete-active">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" data-feature-id="delete-active" class="a-size-small sc-action-delete-active">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.delete-active" data-action="delete-active" type="submit" class="a-color-link">
+<input name="submit.delete-active" value="Delete" data-action="delete-active" type="submit" class="a-color-link" data-feature-id="item-delete-button">
 </span>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" class="a-size-small sc-action-save-for-later">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" data-feature-id="save-for-later" class="a-size-small sc-action-save-for-later">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.save-for-later" data-action="save-for-later" type="submit" class="a-color-link">
+<input name="submit.save-for-later" value="Save for later" data-action="save-for-later" type="submit" class="a-color-link" data-feature-id="save-for-later-action">
 </span>
 </span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i>
 </div>
@@ -305,17 +305,17 @@ Subtotal (6 items):</span><span id="sc-subtotal-amount-buybox" class="sc-price-c
 <span class="sc-quantity-stepper">
 <fieldset name="sc-quantity" class="a-declarative a-stepper-expanding-fieldset" data-steppervalue="1" data-action="a-stepper"><legend class="a-offscreen" aria-hidden="true">Quantity is 1</legend><div></div><div class="a-stepper-inner-container"><div class="a-stepper-controls"><button class="a-declarative" data-action="a-stepper-decrement" data-a-selector="decrement"><span data-a-selector="decrement-icon" class="a-icon a-icon-small-trash"></span></button><div class="a-declarative" data-a-selector="spinbutton" data-action="a-stepper-spinbutton"><span data-a-selector="spinner"><span class="a-spinner a-spinner-small"></span><span class="a-offscreen"></span></span><span data-a-selector="value"><span data-a-selector="inner-value">1</span></span></div><div class="a-offscreen a-stepper-live-region"><div class="a-stepper-value-live">1</div></div><button data-a-selector="increment" class="a-declarative" data-action="a-stepper-increment"><span data-a-selector="increment-icon" class="a-icon a-icon-small-add"></span></button></div></div></fieldset>
 </span>
-<div class="a-input-text-addon-group-wrapper"><div class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
+<div class="a-input-text-addon-group-wrapper"><div data-feature-id="sc-quantity-textfield-input-group" class="a-input-text-addon-group a-width-base sc-quantity-textfield-input-group sc-hidden">
 <span class="a-input-text-addon">Qty:</span>
 <input type="number" value="1" name="quantityBox" class="a-input-text sc-quantity-textfield">
 </div></div>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" class="a-size-small sc-action-delete-active">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="delete-active" data-feature-id="delete-active" class="a-size-small sc-action-delete-active">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.delete-active" data-action="delete-active" type="submit" class="a-color-link">
+<input name="submit.delete-active" value="Delete" data-action="delete-active" type="submit" class="a-color-link" data-feature-id="item-delete-button">
 </span>
-</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" class="a-size-small sc-action-save-for-later">
+</span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i><span data-action="save-for-later" data-feature-id="save-for-later" class="a-size-small sc-action-save-for-later">
 <span class="a-declarative" data-action="sc-item-action">
-<input name="submit.save-for-later" data-action="save-for-later" type="submit" class="a-color-link">
+<input name="submit.save-for-later" value="Save for later" data-action="save-for-later" type="submit" class="a-color-link" data-feature-id="save-for-later-action">
 </span>
 </span><i class="a-icon a-icon-text-separator sc-action-separator" role="presentation"></i>
 </div>
