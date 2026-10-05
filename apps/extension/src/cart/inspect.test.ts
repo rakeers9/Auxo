@@ -48,6 +48,15 @@ describe("inspectAmazonPage on cart pages", () => {
     });
   });
 
+  it("reports a verifiably empty cart as an empty draft with no problems", () => {
+    const inspection = inspectAmazonPage(parse(emptyCartHtml), CART_URL);
+    expect(inspection.pageType).toBe("cart");
+    expect(inspection.problems).toEqual([]);
+    expect(inspection.draft?.items).toEqual([]);
+    expect(inspection.draft?.total_minor).toBe(0);
+    expect(inspection.details).toEqual({ "items seen": "1", removed: "1", subtotal: "(missing)", "nav cart count": '"0"', empty: "yes" });
+  });
+
   it("counts items skipped because they were just saved for later", () => {
     expect(inspectAmazonPage(parse(savedItemCartHtml), CART_URL).details?.removed).toBe("1");
   });
@@ -55,7 +64,15 @@ describe("inspectAmazonPage on cart pages", () => {
   // One case per reason the cart reader gives up. Each must also make
   // extractAmazonCart return null, since both share one code path.
   it.each<[string, () => Document, string]>([
-    ["an empty cart", () => parse(emptyCartHtml), "no items in the active cart"],
+    [
+      "an empty-looking cart the nav bar doesn't confirm",
+      () => {
+        const doc = parse(emptyCartHtml);
+        doc.getElementById("nav-cart-count")!.textContent = "6";
+        return doc;
+      },
+      "no items in the active cart",
+    ],
     ["a missing price", () => cartWith((d) => firstItem(d).removeAttribute("data-price")), 'item 1 has no readable data-price: (missing)'],
     ["an unreadable price", () => cartWith((d) => firstItem(d).setAttribute("data-price", "see price in cart")), 'item 1 has no readable data-price: "see price in cart"'],
     ["a bad quantity", () => cartWith((d) => firstItem(d).setAttribute("data-quantity", "1.5")), 'item 1 has no positive whole data-quantity: "1.5"'],

@@ -60,6 +60,17 @@ export function finishReading(
   return { draft, problems, details };
 }
 
+// A cart the page shows as verifiably empty: no items, no problems. Not a
+// valid Cart for /v1/decide (items must be non-empty), and the flow never
+// decides on it; it only lets watchers see that the last item went away.
+export function emptyReading(
+  pageUrl: string,
+  details: Record<string, string>,
+  { merchant = MERCHANT, currency = CURRENCY }: Pick<FinishOptions, "merchant" | "currency"> = {},
+): Reading {
+  return { draft: { merchant, items: [], total_minor: 0, currency, url: pageUrl }, problems: [], details };
+}
+
 // Trim, collapse whitespace, and cap at the Cart schema's name limit.
 export function cleanName(text: string | null | undefined): string {
   return normalize(text ?? "").slice(0, MAX_NAME_LENGTH);

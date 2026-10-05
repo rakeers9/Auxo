@@ -1,6 +1,6 @@
 import type { CartDraft } from "../messages";
 import { parsePriceToMinor } from "./price";
-import { CURRENCY, cleanName, finishReading, quote, type Reading } from "./reading";
+import { CURRENCY, cleanName, emptyReading, finishReading, quote, type Reading } from "./reading";
 import { resolveAmazonSelectors, withConfigNotes, type SelectorOverrides } from "./selectors";
 
 // Selectors (AMAZON_SELECTORS "cart.*") come from real amazon.com cart pages
@@ -57,10 +57,21 @@ export function readAmazonCart(doc: Document, url: URL, overrides?: SelectorOver
 
   details["items seen"] = String(elements.length);
   details["removed"] = String(removed);
-  if (elements.length - removed === 0) problems.push("no items in the active cart");
-
   const subtotalText = doc.querySelector(s["cart.subtotal"])?.textContent ?? null;
   details["subtotal"] = quote(subtotalText);
+
+  if (elements.length - removed === 0) {
+    // Verifiably empty only when the page agrees with itself: no live items,
+    // no subtotal, and the nav bar counts 0 (real page after the last item was
+    // saved for later). Anything less is ambiguous and stays unreadable.
+    const navCount = doc.querySelector(s["nav.cartCount"])?.textContent?.trim() ?? null;
+    details["nav cart count"] = quote(navCount);
+    if (subtotalText === null && navCount === "0") {
+      details.empty = "yes";
+      return withConfigNotes(emptyReading(`${url.origin}${url.pathname}`, details), notes);
+    }
+    problems.push("no items in the active cart");
+  }
   const total = parsePriceToMinor(subtotalText ?? "", CURRENCY);
   if (elements.length - removed > 0 && total === null) {
     problems.push(subtotalText === null ? `no subtotal (${s["cart.subtotal"]}) on the page` : `subtotal ${quote(subtotalText)} isn't a readable price`);

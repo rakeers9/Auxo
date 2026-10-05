@@ -12,6 +12,9 @@ export const AMAZON_SELECTORS = {
   "cart.removedItem": '[data-removed="true"]',
   "cart.itemTitle": ".sc-product-title .a-truncate-full",
   "cart.subtotal": "#sc-subtotal-amount-buybox",
+  // The nav bar's cart count. It updates with the page, unlike the stale
+  // hidden counts (data-cart-total-item-count, #ewc-total-quantity).
+  "nav.cartCount": "#nav-cart-count",
 
   // Checkout (/checkout/p/<purchase id>/<step>)
   "checkout.lineItems": "#checkout-item-block-panel .lineitem-container",

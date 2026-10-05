@@ -75,8 +75,29 @@ describe("extractAmazonCart", () => {
     });
   });
 
-  it("returns null for an empty cart", () => {
-    expect(extractAmazonCart(parse(emptyCartHtml), CART_URL)).toBeNull();
+  it("returns an empty draft for a verifiably empty cart", () => {
+    // Real page right after the last item was saved for later: no live items
+    // (one line marked removed), no subtotal, nav cart count "0".
+    const doc = parse(emptyCartHtml);
+    expect(doc.querySelector("#sc-subtotal-amount-buybox")).toBeNull();
+    expect(doc.getElementById("nav-cart-count")?.textContent?.trim()).toBe("0");
+    expect(extractAmazonCart(doc, CART_URL)).toEqual({
+      merchant: "amazon.com",
+      items: [],
+      total_minor: 0,
+      currency: "USD",
+      url: "https://www.amazon.com/gp/cart/view.html",
+    });
+  });
+
+  it.each<[string, (d: Document) => void]>([
+    ["the nav count isn't 0", (d) => { d.getElementById("nav-cart-count")!.textContent = "6"; }],
+    ["the nav count is missing", (d) => d.getElementById("nav-cart-count")!.remove()],
+    ["a subtotal is still shown", (d) => { d.getElementById("sc-active-cart")!.insertAdjacentHTML("beforeend", '<span id="sc-subtotal-amount-buybox">$33.99</span>'); }],
+  ])("returns null for an empty-looking cart when %s", (_label, change) => {
+    const doc = parse(emptyCartHtml);
+    change(doc);
+    expect(extractAmazonCart(doc, CART_URL)).toBeNull();
   });
 
   it("returns null on a non-cart page", () => {
