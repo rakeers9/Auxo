@@ -1,15 +1,11 @@
 import type { Verdict } from "@auxo/shared";
 
+import type { CheckoutScore } from "../cart";
+
 // Tier 2 (AUX-26): on sites without a dedicated reader, a page that scores as
 // a checkout gets a generic local pause. Sreekar's decision: no backend
 // verdict and no /v1/decide call (there's no reliable cart to send yet);
 // it's logged locally. A real verdict comes later with Tier 3.
-
-export interface CheckoutScore {
-  pageType: "checkout" | "other";
-  score: number;
-  signals: string[];
-}
 
 // The local answer the pause is drawn from. Never sent anywhere.
 export const GENERIC_PAUSE_SECONDS = 15;
