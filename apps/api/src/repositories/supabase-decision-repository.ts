@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { DecisionContextSchema, VerdictSchema, type DecideResponse } from "@auxo/shared";
+import { VerdictSchema } from "@auxo/shared";
 
 import type { DecisionRecord, DecisionRepository, OwnedDecision } from "./decision-repository.js";
 
@@ -16,41 +16,8 @@ interface DecisionRow {
 export class SupabaseDecisionRepository implements DecisionRepository {
   public constructor(private readonly client: SupabaseClient) {}
 
-  public async findActive(
-    userId: string,
-    cartHash: string,
-    policyVersion: string,
-    now: Date,
-  ): Promise<DecideResponse | null> {
-    const { data, error } = await this.client
-      .from("decisions")
-      .select("id,lane,action,template_id,cooldown_seconds,decision_context")
-      .eq("user_id", userId)
-      .eq("cart_hash", cartHash)
-      .eq("policy_version", policyVersion)
-      .gt("expires_at", now.toISOString())
-      .maybeSingle<DecisionRow>();
-
-    if (error) {
-      throw new Error("Unable to load an existing decision.", { cause: error });
-    }
-
-    if (!data) {
-      return null;
-    }
-
-    const verdict = VerdictSchema.parse({
-      decision_id: data.id,
-      lane: data.lane,
-      action: data.action,
-      template_id: data.template_id,
-      cooldown_seconds: data.cooldown_seconds,
-    });
-    return { ...verdict, context: DecisionContextSchema.parse(data.decision_context) };
-  }
-
   public async save(record: DecisionRecord): Promise<void> {
-    const { error } = await this.client.from("decisions").upsert(
+    const { error } = await this.client.from("decisions").insert(
       {
         id: record.verdict.decision_id,
         user_id: record.userId,
@@ -65,10 +32,8 @@ export class SupabaseDecisionRepository implements DecisionRepository {
         model_version: record.modelVersion,
         model_output: record.modelOutput ?? null,
         decision_context: record.context,
+        trigger: record.trigger ?? null,
         expires_at: record.expiresAt,
-      },
-      {
-        onConflict: "user_id,cart_hash,policy_version",
       },
     );
 

@@ -17,14 +17,19 @@ const cart: Cart = {
 };
 
 describe("DecisionService", () => {
-  it("reuses an active decision for the same user and cart", async () => {
+  it("analyzes the same cart again on every request", async () => {
     const repository = new InMemoryDecisionRepository();
     const service = new DecisionService({ repository, ttlSeconds: 60 });
 
     const first = await service.decide("user-1", cart);
     const second = await service.decide("user-1", cart);
 
-    expect(second).toEqual(first);
+    expect(second.decision_id).not.toBe(first.decision_id);
+    expect(second.lane).toBe(first.lane);
+    expect(second.context?.decision_id).toBe(second.decision_id);
+    expect(repository.list()).toHaveLength(2);
+    expect(await repository.belongsToUser("user-1", first.decision_id)).toBe(true);
+    expect(await repository.belongsToUser("user-1", second.decision_id)).toBe(true);
   });
 
   it("creates user-specific decision ids", async () => {
@@ -38,16 +43,25 @@ describe("DecisionService", () => {
     expect(second.lane).toBe(first.lane);
   });
 
-  it("replaces an expired decision", async () => {
+  it("uses the injected decision id", async () => {
+    const service = new DecisionService({
+      repository: new InMemoryDecisionRepository(),
+      ttlSeconds: 60,
+      newDecisionId: () => "6f1c2b9e-0d4a-4c1e-9b7a-1f2e3d4c5b6a",
+    });
+
+    expect((await service.decide("user-1", cart)).decision_id).toBe("6f1c2b9e-0d4a-4c1e-9b7a-1f2e3d4c5b6a");
+  });
+
+  it("does not let another user claim a decision", async () => {
     const repository = new InMemoryDecisionRepository();
-    let now = new Date("2026-10-03T12:00:00.000Z");
-    const service = new DecisionService({ repository, ttlSeconds: 1, now: () => now });
+    const service = new DecisionService({ repository, ttlSeconds: 60 });
 
-    const first = await service.decide("user-1", cart);
-    now = new Date("2026-10-03T12:00:02.000Z");
-    const second = await service.decide("user-1", cart);
+    const verdict = await service.decide("user-1", cart);
 
-    expect(second).toEqual(first);
+    expect(await repository.belongsToUser("user-2", verdict.decision_id)).toBe(false);
+    expect(await repository.findOwned("user-2", verdict.decision_id)).toBeNull();
+    expect(await repository.findOwned("user-1", verdict.decision_id)).not.toBeNull();
   });
 
   it("uses configured rules and invalidates a decision when settings change", async () => {

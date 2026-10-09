@@ -7,10 +7,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm -r --if-present build",
+    "build": "pnpm -r --workspace-concurrency=1 --if-present build",
     "dev:api": "pnpm --filter @auxo/api dev",
-    "test": "pnpm -r --if-present test",
-    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --workspace-concurrency=1 --if-present test",
+    "typecheck": "pnpm -r --workspace-concurrency=1 --if-present typecheck",
     "eval:policy": "node apps/api/node_modules/tsx/dist/cli.mjs evals/evaluate-policy.ts"
   }
 }

@@ -33,6 +33,11 @@ import { SettingNotFoundError, SettingsService } from "./services/settings-servi
 import type { DecisionModelProvider } from "./services/decision-model-provider.js";
 import { InMemoryPassRepository, type PassRepository } from "./repositories/pass-repository.js";
 import { PassNotAvailableError, PassService } from "./services/pass-service.js";
+import {
+  InMemoryStoreConfigRepository,
+  type StoreConfigRepository,
+} from "./repositories/store-config-repository.js";
+import { StoreConfigService } from "./services/store-config-service.js";
 
 const DEVELOPMENT_USER_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -48,6 +53,7 @@ export interface BuildAppOptions {
   decisionModelProvider?: DecisionModelProvider;
   passRepository?: PassRepository;
   passTtlSeconds?: number;
+  storeConfigRepository?: StoreConfigRepository;
   rateLimitMax?: number;
   rateLimitWindowMs?: number;
 }
@@ -90,6 +96,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     decisionRepository,
     options.passRepository ?? new InMemoryPassRepository(),
     options.passTtlSeconds ?? 600,
+  );
+  const storeConfigService = new StoreConfigService(
+    options.storeConfigRepository ?? new InMemoryStoreConfigRepository(),
+    (entry) => app.log.warn({ entry }, "Skipped a store config entry"),
   );
   const rateLimitMax = options.rateLimitMax ?? 120;
   const rateLimitWindowMs = options.rateLimitWindowMs ?? 60_000;
@@ -139,7 +149,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       });
     }
 
-    const verdict = await decisionService.decide(user.id, parsed.data.cart);
+    const verdict = await decisionService.decide(user.id, parsed.data.cart, parsed.data.trigger);
     return reply.status(200).send(verdict);
   });
 
@@ -232,6 +242,14 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const parsed = ActivePassQuerySchema.safeParse(request.query);
     if (!parsed.success) return invalidRequest(reply, "The active pass query is invalid.", parsed.error.flatten());
     return reply.send({ pass: await passService.active(user.id, parsed.data.cart_hash) });
+  });
+
+  // Store selector overrides and on/off switches (StoreConfig). The same for
+  // every user, but authenticated like every other route.
+  app.get("/v1/config", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    return reply.send(await storeConfigService.getConfig());
   });
 
   const IdParamsSchema = z.object({ id: z.string().uuid() }).strict();

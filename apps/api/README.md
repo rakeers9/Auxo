@@ -96,9 +96,9 @@ Run `pnpm eval:policy` to evaluate the deterministic policy against 100 labeled
 synthetic carts. The command reports accuracy and a lane confusion matrix and
 fails when accuracy drops below 95%.
 
-Within the configured decision TTL, the same authenticated user, cart hash, and
-policy configuration reuse the stored decision. Changing a rule or budget
-automatically causes the cart to be evaluated again.
+Every request is evaluated fresh and stored as its own decision with a new
+random `decision_id`. Stored decisions are never reused, so the same cart can
+get a different answer as rules, budgets, history, or the model's view change.
 
 Use hashes ending in `0`, `1`, `2`, `3`, or `4` to request L0, L1, L2, L3, or
 L4 while testing. The other 63 characters must also be hexadecimal.

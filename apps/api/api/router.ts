@@ -10,6 +10,8 @@ export default async function handler(
 ): Promise<void> {
   await ready;
   const url = new URL(request.url ?? "/", "https://auxo.local");
-  request.url = url.searchParams.get("path") ?? "/";
+  const path = url.searchParams.get("path") ?? "/";
+  url.searchParams.delete("path");
+  request.url = path + (url.searchParams.size ? `?${url.searchParams}` : "");
   app.routing(request, response);
 }

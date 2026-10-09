@@ -1,0 +1,908 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Build your integration | Adyen Docs</title></head>
+<body id="adyen">
+<div id="docs-header-navigation"><header><div><nav><div><button type="button"><i role="img"></i></button></div><div><a></a></div><div>
+<nav><ul><li><a>API Explorer</a></li><li><a>Support</a></li><li><a>Sign up</a></li></ul></nav></div></nav><nav><div><div><ul role="menu"><li role="menuitem"><button role="button">Payments</button><i role="img"></i><div id="menu-item-1"><div><ul><li><a><div><p>Get started</p><p>Start accepting payments with Adyen.</p></div></a></li><li><a><div><p>Online payments</p><p>Accept ecommerce payments on your website or in your mobile app.</p></div></a></li><li><a><div><p>In-person payments</p><p>Accept point-of-sale payments with our terminals and Tap to Pay.</p></div></a></li><li><a><div><p>Omnichannel</p><p>Get insights and build customer journeys across sales channels.</p></div></a></li><li><a><div><p>Plugins</p><p>Connect your existing commerce system to our payments platform.</p></div></a></li></ul></div></div></li></ul></div></div><li role="menuitem"><button role="button">Adyen for Platforms</button><i role="img"></i><div id="menu-item-2"><div><ul><li><a><div><p>Get started</p><p>Discover which Adyen for Platforms offering is the best for you.</p></div></a></li><li><a><div><p>Platforms</p><p>Enable your users to accept online and in-person payments.</p></div></a></li><li><a><div><p>Marketplaces</p><p>Allow sellers to accept online payments on your marketplace.</p></div></a></li><li><a><div><p>Business accounts</p><p>Offer business accounts to your users.</p></div></a></li><li><a><div><p>Capital</p><p>Enable fast business financing for your users.</p></div></a></li><li><a><div><p>Embedded issuing</p><p>Create physical and virtual cards for your users.</p></div></a></li><li><a><div><p>Classic platforms</p><p>Adyen for Platforms integrations before Aug 1, 2022.</p></div></a></li></ul></div></div></li></nav></div></header></div><li role="menuitem"><button role="button">Enterprise financial products</button><i role="img"></i><div id="menu-item-3"><div><ul><li><a><div><p>Enterprise accounts</p></div></a></li><li><a><div><p>Enterprise issuing</p><p>Create physical and virtual cards to manage your expenses.</p></div></a></li><li><a><div><p>Payouts</p><p>Make payouts to third parties in multiple locations and currencies.</p></div></a></li></ul></div></div></li><li role="menuitem"><button role="button">Business operations</button><i role="img"></i><div id="menu-item-4"><div><ul><li><a><div><p>Account</p><p>Manage your Adyen account configuration in your dashboard.</p></div></a></li><li><a><div><p>Reporting</p><p>Get financial or operational reports for your business.</p></div></a></li><li><a><div><p>Risk management</p><p>Detect payment fraud, reduce risk, and handle disputes.</p></div></a></li><li><a><div><p>Adyen Uplift</p><p>Optimize your integration by balancing payment conversion, fraud, and cost.</p></div></a></li></ul></div></div></li><li role="menuitem"><button role="button">Development resources</button><i role="img"></i><div id="menu-item-5"><div><ul><li><a><div><p>API credentials</p><p>Authenticate your API requests with Adyen.</p></div></a></li><li><a><div><p>Webhooks</p><p>Get updates about your account, payments, and other integration aspects.</p></div></a></li><li><a><div><p>Error codes and messages</p><p>Learn about error responses to API requests.</p></div></a></li><li><a><div><p>Release notes</p><p>Keep track of the updates and changes in our products.</p></div></a></li><li><a><div><p>More development resources</p><p>Learn about testing, integration, and security best practices.</p></div></a></li></ul></div></div></li><li role="menuitem"><button role="button">Industries and markets</button><i role="img"></i><div id="menu-item-6"><div><ul><li><a><div><p>Industries</p><p>See what features we recommend.</p></div></a></li><li><a><div><p>Markets</p><p>Dive into discussions about specific markets.</p></div></a></li><li><a><div><p>Peak season readiness</p><p>Prepare for the busiest period in the year.</p></div></a></li></ul></div></div></li>
+<div>
+<div>
+<nav>
+<div>
+<div>
+<div id="navigation-build-your-integration"></div>
+</div>
+<div>
+<div>
+<a>
+                Overview
+            </a>
+</div>
+<div>
+<a>
+                                    Payment methods
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Release notes
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Upgrade your integration
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Migrate to Checkout API
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Upgrade your Java API library
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Upgrade to Checkout API v72
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Upgrade to Adyen Web v6
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Upgrade from v4.x.x
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Upgrade from v3.x.x
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Upgrade to Adyen Android v5
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Upgrade to Adyen iOS v5
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Integration checklist
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Build your integration
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Sessions flow
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Advanced flow
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Result codes
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Best practices for web
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Checkout settings
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Go-live checklist
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Capture
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    CAPTURE_FAILED reasons
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Cancel
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Refund
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Reversal
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Authorization adjustment
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Adjust an authorization
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Authentication
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Google SPA
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Scheme passkeys
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    3D Secure 2
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    3D Secure 2
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Native
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Redirect
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Web Drop-in
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Web Component
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    iOS Drop-in
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    iOS Component
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Android Drop-in
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Android Component
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Earlier versions
+                                                                    </a>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Third-party authentication
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Data only
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Standalone authentication
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    API reference
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Tokenization
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Create tokens
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Make token payments
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Manage tokens
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Forward payment details
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Network tokenization
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Account Updater
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Real Time Account Updater
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Batch Account Updater
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Auto Rescue
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Cards
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    SEPA direct debit
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Donations
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Online payments integration
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Sessions flow
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Advanced flow
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Testing
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Terms and Conditions
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Instant card funding
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Online payouts
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Instant card payouts
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Payouts in stages
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Payout webhook
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Payout to a bank account
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Partial authorizations
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Partial payments
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Two-step checkout
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Surcharge
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Accessibility
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Analytics and data tracking
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Generate HAR file
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Card encryption with JWE
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    PCI DSS compliance
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    3D Secure for regulation compliance
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    PSD2 SCA compliance guide
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Implement SCA compliance
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    AusPayNet compliance guide
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Japan credit card security guidelines
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Payments India compliance guide
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    India go-live checklist
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Co-badged cards compliance
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Classic integrations
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Classic API integration
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Client-Side Encryption
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    CSE library public key, location, and token
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Hosting the CSE library
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Tokenization
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Store payment details
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Retrieve stored details
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Authorise a recurring payment
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Authorise using details stored with a third party
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Capture a recurring payment
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Update stored details
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Disable stored details
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    3D Secure
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Redirect
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Authentication-only integration
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Custom 3D Secure implementation
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Custom 3D Secure using an external MPI
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Custom 3D Secure using a hosted MPI
+                                                                    </a>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Native 3DS2
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Browser-based integration
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Helper functions
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    iOS 3D Secure 2 SDK
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Android 3D Secure 2 SDK
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Authentication-only integration
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    API reference
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Other 3D Secure flows
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Authorise a payment with 3DS2 authenticated data
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Data-only flow
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Raw 3D Secure responses
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Gift cards (classic)
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Google Pay (classic)
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Pix (classic)
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Modify payments
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Capture
+                                                                            
+</a>
+<div>
+<div>
+<a>
+                                    Failure reasons
+                                                                    </a>
+</div>
+</div>
+</div>
+<div>
+<a>
+                                    Cancel
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Refund
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Cancel or refund
+                                                                    </a>
+</div>
+<div>
+<a>
+                                    Pre-authorisation and adjustment
+                                                                    </a>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div>&nbsp;</div>
+</div>
+</nav>
+</div>
+<div>
+<div>
+<div>
+<div>
+<div>
+<article role="article">
+<div>
+<nav role="navigation">
+<a>
+                            Home
+                        </a>
+<a>
+                            Online payments
+                        </a>
+</nav>
+<div>
+<div><div><div><button><span>Copy as Markdown</span></button><button></button></div></div></div>
+</div>
+</div>
+<div>
+<div id="page-introduction">
+<h1 id="-build-your-integration-">
+                                    Build your integration
+                                </h1>
+</div>
+</div>
+<div>
+<p><a>client-side libraries</a></p>
+<h2 id="choose-your-server-side-implementation"><a></a>Choose your server-side implementation</h2>
+<p><a>use cases</a></p>
+<div>
+<div><h3 id="sessions-flow-a-single-api-request"><a></a>Sessions flow: a single API request</h3><p><a>/sessions</a><a>additional use cases</a><br><a></a></p></div><div><h3 id="advanced-flow-three-api-requests"><a></a>Advanced flow: three API requests</h3><p><a>/paymentMethods</a><a>/payments</a><a>/payments/details</a><br><a></a></p></div></div>
+<div>
+<div>
+<div role="item">
+<div>
+<h3 id="sessions-flow-with-additional-methods"><a></a>Sessions flow with additional methods</h3>
+</div>
+</div>
+<div role="region">
+<p><a>/payments</a><a>/payments/details</a><br>
+<a>
+</a></p>
+</div>
+</div>
+</div>
+<h3 id="supported-use-cases"><a></a>Supported use cases</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a>express checkout</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="integration-comparison"><a></a>Integration comparison</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+<th></th>
+<th></th>
+</tr>
+</thead>
+</table>
+<h2 id="get-started"><a></a>Get started</h2>
+<div id="next-steps">
+<a><div><h6>Sessions flow</h6><p>Your server makes one Checkout API request.</p></div></a><a><div><h6>Advanced flow</h6><p>Your server makes three Checkout API requests.</p></div></a></div>
+</div>
+</article>
+<footer>
+<div>
+<div>
+<div>
+<div>
+<ul>
+<li><a>About Adyen</a></li>
+<li><a>Careers</a></li>
+<li><a>Contact</a></li>
+</ul>
+</div>
+<div>
+<ul>
+<li><a>Academy</a></li>
+<li><a>Knowledge Hub</a></li>
+<li><a>Help</a></li>
+</ul>
+</div>
+<div>
+<ul>
+<li><a>Example integrations</a></li>
+<li><a>Developer newsletter</a></li>
+<li><a>Release notes</a></li>
+<li><a>llms.txt</a></li>
+</ul>
+</div>
+<div>
+<ul>
+<li><a>Licenses</a></li>
+<li><a>Terms &amp; Conditions</a></li>
+</ul>
+</div>
+</div>
+<div>
+<ul>
+<li><a>
+</a></li>
+<li><a>
+</a></li>
+<li><a>
+</a></li>
+</ul>
+</div>
+</div>
+<ul>
+<li><a>Privacy</a></li>
+<li><a>Cookies</a></li>
+<li><a>Disclaimer</a></li>
+</ul>
+</div>
+</footer>
+</div>
+<div>
+<div><nav><ul><li><a>
+                                    Build your integration
+                                </a></li><li><a>Choose your server-side implementation</a></li><li><a>Get started</a></li></ul></nav></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="modals-area">
+<portal-target>
+</portal-target><div><div><aside><div><div><nav><div><div><a></a></div><div><i role="img"></i></div></div><h3>Online payments</h3><div><div><div><div><div><a>Overview</a></div></div></div></div><div><div><div><div><a>Payment methods</a></div></div></div></div><div><div><div><div><a>Release notes</a></div></div></div></div><div><div><a role="button"><div><div role="heading">Upgrade your integration</div></div></a><div role="region"><div><div><div><a role="button"><div><div role="heading">Migrate to Checkout API</div></div></a><div role="region"><div><div><div><div><a>Upgrade your Java API library</a></div></div></div></div></div></div></div></div><div><div><div><div><a>Upgrade to Checkout API v72</a></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Upgrade to Adyen Web v6</div></div></a><div role="region"><div><div><div><div><a>Upgrade from v4.x.x</a></div></div></div></div><div><div><div><div><a>Upgrade from v3.x.x</a></div></div></div></div></div></div></div></div><div><div><div><div><a>Upgrade to Adyen Android v5</a></div></div></div></div><div><div><div><div><a>Upgrade to Adyen iOS v5</a></div></div></div></div></div></div></div></div><ul><li><div><div><div><div><div><a>Integration checklist</a></div></div></div></div><div><div><a role="button"><div><div role="heading">Build your integration</div></div></a><div role="region"><div><div><div><div><a>Sessions flow</a></div></div></div></div><div><div><div><div><a>Advanced flow</a></div></div></div></div><div><div><div><div><a>Result codes</a></div></div></div></div></div></div></div><div><div><div><div><a>Best practices for web</a></div></div></div></div><div><div><div><div><a>Checkout settings</a></div></div></div></div><div><div><div><div><a>Go-live checklist</a></div></div></div></div></div></li><li><div><div><div><a role="button"><div><div role="heading">Capture</div></div></a><div role="region"><div><div><div><div><a>CAPTURE_FAILED reasons</a></div></div></div></div></div></div></div><div><div><div><div><a>Cancel</a></div></div></div></div><div><div><div><div><a>Refund</a></div></div></div></div><div><div><div><div><a>Reversal</a></div></div></div></div><div><div><a role="button"><div><div role="heading">Authorization adjustment</div></div></a><div role="region"><div><div><div><div><a>Adjust an authorization</a></div></div></div></div></div></div></div></div></li><li><div><div><div><a role="button"><div><div role="heading">Authentication</div></div></a><div role="region"><div><div><div><div><a>Google SPA</a></div></div></div></div><div><div><div><div><a>Scheme passkeys</a></div></div></div></div><div><div><div><div><a>3D Secure 2</a></div></div></div></div></div></div></div><div><div><a role="button"><div><div role="heading">3D Secure 2</div></div></a><div role="region"><div><div><div><div><a>Native</a></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Redirect</div></div></a><div role="region"><div><div><div><div><a>Web Drop-in</a></div></div></div></div><div><div><div><div><a>Web Component</a></div></div></div></div><div><div><div><div><a>iOS Drop-in</a></div></div></div></div><div><div><div><div><a>iOS Component</a></div></div></div></div><div><div><div><div><a>Android Drop-in</a></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Android Component</div></div></a><div role="region"><div><div><div><div><a>Earlier versions</a></div></div></div></div></div></div></div></div></div></div></div></div><div><div><div><div><a>Third-party authentication</a></div></div></div></div><div><div><div><div><a>Data only</a></div></div></div></div><div><div><div><div><a>Standalone authentication</a></div></div></div></div><div><div><div><div><a>API reference</a></div></div></div></div></div></div></div><div><div><a role="button"><div><div role="heading">Tokenization</div></div></a><div role="region"><div><div><div><div><a>Create tokens</a></div></div></div></div><div><div><div><div><a>Make token payments</a></div></div></div></div><div><div><div><div><a>Manage tokens</a></div></div></div></div><div><div><div><div><a>Forward payment details</a></div></div></div></div></div></div></div><div><div><div><div><a>Network tokenization</a></div></div></div></div><div><div><a role="button"><div><div role="heading">Account Updater</div></div></a><div role="region"><div><div><div><div><a>Real Time Account Updater</a></div></div></div></div><div><div><div><div><a>Batch Account Updater</a></div></div></div></div></div></div></div><div><div><a role="button"><div><div role="heading">Auto Rescue</div></div></a><div role="region"><div><div><div><div><a>Cards</a></div></div></div></div><div><div><div><div><a>SEPA direct debit</a></div></div></div></div></div></div></div><div><div><a role="button"><div><div role="heading">Donations</div></div></a><div role="region"><div><div><div><a role="button"><div><div role="heading">Online payments integration</div></div></a><div role="region"><div><div><div><div><a>Sessions flow</a></div></div></div></div><div><div><div><div><a>Advanced flow</a></div></div></div></div></div></div></div></div><div><div><div><div><a>Testing</a></div></div></div></div><div><div><div><div><a>Terms and Conditions</a></div></div></div></div></div></div></div><div><div><div><div><a>Instant card funding</a></div></div></div></div><div><div><a role="button"><div><div role="heading">Online payouts</div></div></a><div role="region"><div><div><div><div><a>Instant card payouts</a></div></div></div></div><div><div><div><div><a>Payouts in stages</a></div></div></div></div><div><div><div><div><a>Payout webhook</a></div></div></div></div><div><div><div><div><a>Payout to a bank account</a></div></div></div></div></div></div></div><div><div><div><div><a>Partial authorizations</a></div></div></div></div><div><div><div><div><a>Partial payments</a></div></div></div></div><div><div><div><div><a>Two-step checkout</a></div></div></div></div><div><div><div><div><a>Surcharge</a></div></div></div></div><div><div><div><div><a>Accessibility</a></div></div></div></div><div><div><div><div><a>Analytics and data tracking</a></div></div></div></div><div><div><div><div><a>Generate HAR file</a></div></div></div></div><div><div><div><div><a>Card encryption with JWE</a></div></div></div></div></div></li><li><div><div><div><div><div><a>PCI DSS compliance</a></div></div></div></div><div><div><div><div><a>3D Secure for regulation compliance</a></div></div></div></div><div><div><a role="button"><div><div role="heading">PSD2 SCA compliance guide</div></div></a><div role="region"><div><div><div><div><a>Implement SCA compliance</a></div></div></div></div></div></div></div><div><div><div><div><a>AusPayNet compliance guide</a></div></div></div></div><div><div><div><div><a>Japan credit card security guidelines</a></div></div></div></div><div><div><a role="button"><div><div role="heading">Payments India compliance guide</div></div></a><div role="region"><div><div><div><div><a>India go-live checklist</a></div></div></div></div></div></div></div><div><div><div><div><a>Co-badged cards compliance</a></div></div></div></div></div></li><li><div><div><div><a role="button"><div><div role="heading">Classic integrations</div></div></a><div role="region"><div><div><div><a role="button"><div><div role="heading">Classic API integration</div></div></a><div role="region"><div><div><div><a role="button"><div><div role="heading">Client-Side Encryption</div></div></a><div role="region"><div><div><div><div><a>CSE library public key, location, and token</a></div></div></div></div><div><div><div><div><a>Hosting the CSE library</a></div></div></div></div></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Tokenization</div></div></a><div role="region"><div><div><div><div><a>Store payment details</a></div></div></div></div><div><div><div><div><a>Retrieve stored details</a></div></div></div></div><div><div><div><div><a>Authorise a recurring payment</a></div></div></div></div><div><div><div><div><a>Authorise using details stored with a third party</a></div></div></div></div><div><div><div><div><a>Capture a recurring payment</a></div></div></div></div><div><div><div><div><a>Update stored details</a></div></div></div></div><div><div><div><div><a>Disable stored details</a></div></div></div></div></div></div></div></div><div><div><div><a role="button"><div><div role="heading">3D Secure</div></div></a><div role="region"><div><div><div><a role="button"><div><div role="heading">Redirect</div></div></a><div role="region"><div><div><div><div><a>Authentication-only integration</a></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Custom 3D Secure implementation</div></div></a><div role="region"><div><div><div><div><a>Custom 3D Secure using an external MPI</a></div></div></div></div><div><div><div><div><a>Custom 3D Secure using a hosted MPI</a></div></div></div></div></div></div></div></div></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Native 3DS2</div></div></a><div role="region"><div><div><div><a role="button"><div><div role="heading">Browser-based integration</div></div></a><div role="region"><div><div><div><div><a>Helper functions</a></div></div></div></div></div></div></div></div><div><div><div><div><a>iOS 3D Secure 2 SDK</a></div></div></div></div><div><div><div><div><a>Android 3D Secure 2 SDK</a></div></div></div></div><div><div><div><div><a>Authentication-only integration</a></div></div></div></div><div><div><div><div><a>API reference</a></div></div></div></div></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Other 3D Secure flows</div></div></a><div role="region"><div><div><div><div><a>Authorise a payment with 3DS2 authenticated data</a></div></div></div></div><div><div><div><div><a>Data-only flow</a></div></div></div></div></div></div></div></div><div><div><div><div><a>Raw 3D Secure responses</a></div></div></div></div></div></div></div></div><div><div><div><div><a>Gift cards (classic)</a></div></div></div></div><div><div><div><div><a>Google Pay (classic)</a></div></div></div></div><div><div><div><div><a>Pix (classic)</a></div></div></div></div></div></div></div></div><div><div><div><a role="button"><div><div role="heading">Modify payments</div></div></a><div role="region"><div><div><div><a role="button"><div><div role="heading">Capture</div></div></a><div role="region"><div><div><div><div><a>Failure reasons</a></div></div></div></div></div></div></div></div><div><div><div><div><a>Cancel</a></div></div></div></div><div><div><div><div><a>Refund</a></div></div></div></div><div><div><div><div><a>Cancel or refund</a></div></div></div></div><div><div><div><div><a>Pre-authorisation and adjustment</a></div></div></div></div></div></div></div></div></div></div></div></div></li></ul></nav></div><div><nav><ul><li><a>API Explorer</a></li><li><a>Support</a></li><li><a>Sign up</a></li></ul></nav></div></div></aside></div></div></div>
+<iframe></iframe>
+<div id="onetrust-consent-sdk"><div id="onetrust-banner-sdk"><div role="dialog"><div><div id="onetrust-group-container"><div id="onetrust-policy"><h2 id="onetrust-policy-title">Cookie Policy</h2><div id="onetrust-policy-text"><a>Privacy Statement.</a></div></div></div><div id="onetrust-button-group-parent"><div id="onetrust-button-group"><div><button id="onetrust-accept-btn-handler">Accept Cookies</button>
+<button id="onetrust-reject-all-handler">Reject All</button></div><button id="onetrust-pc-btn-handler">Cookie settings</button></div></div><div id="onetrust-close-btn-container"><button></button></div></div></div></div><div id="onetrust-pc-sdk"><div role="dialog"><div><button id="close-pc-btn-handler"></button></div><div id="ot-pc-content"><div><span id="ot-pc-gpc-txt"></span></div><h2 id="ot-pc-title">Cookie Preference Center</h2><div id="ot-pc-desc"><br><a>Cookie Policy</a></div><button id="accept-recommended-btn-handler">Allow All</button><section><h3 id="ot-category-title"> Manage Consent Preferences</h3><div><button></button><div><h4 id="ot-header-id-C0001"></h4><div id="ot-status-id-C0001"></div></div><div><p id="ot-desc-id-C0001"></p></div></div><div><button></button><div><h4 id="ot-header-id-SSPD_BG"></h4><div><input type="checkbox" name="ot-group-id-SSPD_BG" id="ot-group-id-SSPD_BG">
+<label for="ot-group-id-SSPD_BG">
+<span>Share Or Sale of Personal Data</span></label>
+</div></div><div><p id="ot-desc-id-SSPD_BG"></p><div><ul><li><h5></h5><div><div><input type="checkbox" name="switch" id="ot-sub-group-id-C0004">
+<label for="ot-sub-group-id-C0004">
+<span>Switch Label</span></label>
+</div></div></li></ul></div><div><ul><li><h5></h5><div><div><input type="checkbox" name="switch" id="ot-sub-group-id-C0002">
+<label for="ot-sub-group-id-C0002">
+<span>Switch Label</span></label>
+</div></div></li></ul></div><div><ul><li><h5></h5><div><div><input type="checkbox" name="switch" id="ot-sub-group-id-C0005">
+<label for="ot-sub-group-id-C0005">
+<span>Switch Label</span></label>
+</div></div></li></ul></div></div></div></section></div><section id="ot-pc-lst"><div id="ot-pc-hdr"><div id="ot-lst-title"><button></button><h3>Cookie List</h3></div><div><div><p role="status"></p><input id="vendor-search-handler" type="text" name="vendor-search-handler">
+</div><div><button id="filter-btn-handler"></button></div><div id="ot-anchor"></div><section id="ot-fltr-modal"><div id="ot-fltr-cnt"><button id="clear-filters-handler">Clear</button><fieldset><legend id="ot-filter-list-header"></legend><ul><li><div><input id="chkbox-id" type="checkbox">
+<label for="chkbox-id"><span>checkbox label</span></label>
+</div></li></ul><div><button id="filter-apply-handler">Apply</button>
+<button id="filter-cancel-handler">Cancel</button></div></fieldset></div></section></div></div><section id="ot-lst-cnt"><div id="ot-sel-blk"><div><div><div id="ot-selall-hostcntr"><input id="select-all-hosts-groups-handler" type="checkbox">
+<label for="select-all-hosts-groups-handler"><span>checkbox label</span></label>
+</div><div id="ot-selall-vencntr"><input id="select-all-vendor-groups-handler" type="checkbox">
+<label for="select-all-vendor-groups-handler"><span>checkbox label</span></label>
+</div><div id="ot-selall-licntr"><input id="select-all-vendor-leg-handler" type="checkbox">
+<label for="select-all-vendor-leg-handler"><span>checkbox label</span></label>
+</div></div></div></div></section></section><div><div><button>Reject All</button>
+<button>Confirm My Choices</button></div><div><a></a></div></div></div><iframe title="onetrust-text-resize"></iframe></div></div>
+</body></html>

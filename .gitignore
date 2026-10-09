@@ -7,3 +7,6 @@ coverage/
 .DS_Store
 .vercel/
 supabase/.temp/
+.claude/worktrees/
+.wxt/
+.output/

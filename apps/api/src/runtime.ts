@@ -12,6 +12,8 @@ import { SupabaseOutcomeRepository } from "./repositories/supabase-outcome-repos
 import { SupabasePassRepository } from "./repositories/supabase-pass-repository.js";
 import { SupabaseSettingsRepository } from "./repositories/supabase-settings-repository.js";
 import { CloudflareClefProvider } from "./services/decision-model-provider.js";
+import { InMemoryStoreConfigRepository } from "./repositories/store-config-repository.js";
+import { SupabaseStoreConfigRepository } from "./repositories/supabase-store-config-repository.js";
 
 export function createProductionApp() {
   const config = loadConfig();
@@ -43,6 +45,9 @@ export function createProductionApp() {
     passRepository: serviceClient
       ? new SupabasePassRepository(serviceClient)
       : new InMemoryPassRepository(),
+    storeConfigRepository: serviceClient
+      ? new SupabaseStoreConfigRepository(serviceClient)
+      : new InMemoryStoreConfigRepository(),
     decisionTtlSeconds: config.decisionTtlSeconds,
     passTtlSeconds: config.passTtlSeconds,
     rateLimitMax: config.rateLimitMax,

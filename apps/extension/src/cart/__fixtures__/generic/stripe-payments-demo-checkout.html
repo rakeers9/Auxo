@@ -1,0 +1,213 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Stripe Payments Demo</title></head>
+<body>
+<main id="main">
+<header>
+<a>Stripe Payments Demo</a>
+<a>View on GitHub</a>
+</header>
+<div id="checkout">
+<div id="payment-request">
+<div id="payment-request-button"></div>
+</div>
+<form id="payment-form">
+<p><span id="generate"></span></p>
+<section>
+<h2>Shipping &amp; Billing Information</h2>
+<fieldset>
+<label>
+<span>Name</span>
+<input name="name">
+</label>
+<label>
+<span>Email</span>
+<input name="email" type="email">
+</label>
+<label>
+<span>Address</span>
+<input name="address">
+</label>
+<label>
+<span>City</span>
+<input name="city">
+</label>
+<label>
+<span>State</span>
+<input name="state">
+</label>
+<label>
+<span>ZIP</span>
+<input name="postal_code">
+</label>
+<label>
+<span>Country</span>
+<div id="country">
+<select name="country">
+<option>Australia</option>
+<option>Austria</option>
+<option>Belgium</option>
+<option>Brazil</option>
+<option>Canada</option>
+<option>China</option>
+<option>Denmark</option>
+<option>Finland</option>
+<option>France</option>
+<option>Germany</option>
+<option>Hong Kong</option>
+<option>Ireland</option>
+<option>Italy</option>
+<option>Japan</option>
+<option>Luxembourg</option>
+<option>Malaysia</option>
+<option>Mexico</option>
+<option>Netherlands</option>
+<option>New Zealand</option>
+<option>Norway</option>
+<option>Poland</option>
+<option>Portugal</option>
+<option>Singapore</option>
+<option>Spain</option>
+<option>Sweden</option>
+<option>Switzerland</option>
+<option>United Kingdom</option>
+<option>United States</option>
+</select>
+</div>
+</label>
+</fieldset>
+</section>
+<section>
+<h2>Payment Information</h2>
+<nav id="payment-methods">
+<ul>
+<li>
+<input type="radio" name="payment" id="payment-card">
+<label for="payment-card">Card</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-ach_credit_transfer">
+<label for="payment-ach_credit_transfer">Bank Transfer</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-alipay">
+<label for="payment-alipay">Alipay</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-bancontact">
+<label for="payment-bancontact">Bancontact</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-eps">
+<label for="payment-eps">EPS</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-ideal">
+<label for="payment-ideal">iDEAL</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-giropay">
+<label for="payment-giropay">Giropay</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-multibanco">
+<label for="payment-multibanco">Multibanco</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-p24">
+<label for="payment-p24">Przelewy24</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-sepa_debit">
+<label for="payment-sepa_debit">SEPA Direct Debit</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-sofort">
+<label for="payment-sofort">SOFORT</label>
+</li>
+<li>
+<input type="radio" name="payment" id="payment-wechat">
+<label for="payment-wechat">WeChat Pay</label>
+</li>
+</ul>
+</nav>
+<div>
+<fieldset>
+<label>
+<span>Card</span>
+<div id="card-element"><div><iframe name="__privateStripeFrame2013" role="presentation" title="Secure card payment input frame" src="https://js.stripe.com/v3/elements-inner-card-1403ac61b1f3f01395b87fdaa0415c7b.html"></iframe><input autocomplete="false"></div></div>
+</label>
+</fieldset>
+</div>
+<div>
+<fieldset>
+<label>
+<span>IBAN</span>
+<div id="iban-element"><div><iframe name="__privateStripeFrame2014" role="presentation" title="Secure IBAN input frame" src="https://js.stripe.com/v3/elements-inner-iban-deaa036c1d037481597620cd475e7f4a.html"></iframe><input autocomplete="false"></div></div>
+</label>
+</fieldset>
+</div>
+<div>
+<fieldset>
+<label>
+<span>iDEAL Bank</span>
+<div id="ideal-bank-element"><div><iframe name="__privateStripeFrame2015" role="presentation" title="Secure iDEAL bank selection dropdown button" src="https://js.stripe.com/v3/elements-inner-ideal-bank-dcebf8693b2cefa7459005df4966d999.html"></iframe><iframe name="__privateStripeFrame2016" role="presentation" title="Secure iDEAL bank selection dropdown list" src="https://js.stripe.com/v3/elements-inner-ideal-bank-dcebf8693b2cefa7459005df4966d999.html"></iframe><input autocomplete="false"></div></div>
+</label>
+</fieldset>
+</div>
+<div>
+<div id="wechat-qrcode"></div>
+</div>
+</section>
+<button type="submit">Pay</button>
+</form>
+<div id="card-errors"></div>
+<div id="iban-errors"></div>
+</div>
+<div id="confirmation">
+<div>
+<h1>Completing your order…</h1>
+</div>
+<div>
+<h1>Thanks for your order!</h1>
+</div>
+<div>
+<h1>Thanks! One last step!</h1>
+</div>
+<div>
+<h1>Oops, payment failed.</h1>
+</div>
+</div>
+</main>
+<aside id="summary">
+<div>
+<h1>Order Summary</h1>
+</div>
+<div id="order-items"><div>
+<p>€7.99</p>
+<p>€15.98</p></div><div>
+<p>€9.99</p>
+<p>€9.99</p></div><div>
+<p>€3.99</p>
+<p>€7.98</p></div></div>
+<div id="order-total">
+<div>
+<p>€33.95</p>
+</div>
+<div>
+<div id="demo">
+<table>
+<tbody>
+<tr>
+<td><a>Authentication</a></td>
+</tr>
+</tbody></table>
+<p><a>docs</a></p>
+</div>
+</div>
+<div>
+<p>€33.95</p>
+</div>
+</div>
+</aside>
+<iframe name="__privateStripeController2011" role="presentation" src="https://js.stripe.com/v3/controller-with-preconnect-5c032b3e610f57352a2cbc3feeef0c04.html"></iframe><iframe name="__privateStripeFrame2018" role="presentation" src="https://js.stripe.com/v3/payment-request-inner-google-pay-d01c483ec9251cb06cdc918be6cc95e6.html"></iframe><iframe name="__privateStripeFrame2019" role="presentation" src="https://js.stripe.com/v3/payment-request-inner-browser-9849ac2d29dd3cd4667f9a19b9433bf0.html"></iframe><div><iframe name="__privateStripeFrame20111" role="presentation" src="https://js.stripe.com/v3/universal-link-modal-inner-8aa4500107e7db07859b5e88fc6bc246.html"></iframe></div><iframe name="__privateStripeMetricsController2010" role="presentation" src="https://js.stripe.com/v3/m-outer-3437aaddcdf6922d623e172c2d6f9278.html"></iframe>
+</body></html>

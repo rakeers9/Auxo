@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Auxo connection</title></head>
+<body><h1>Connect Auxo</h1><p>Sign in with an existing Supabase email/password account. Use your project's public key, never its service-role key.</p>
+<form id="login">
+<p><label>Supabase URL <input id="url" type="url" value="https://wckjshamacpnuksxqqcd.supabase.co" required></label></p>
+<p><label>Public publishable / anon key <input id="key" required></label></p>
+<p><label>Email <input id="email" type="email" autocomplete="username" required></label></p>
+<p><label>Password <input id="password" type="password" autocomplete="current-password" required></label></p>
+<button>Sign in</button></form><button id="logout">Sign out</button><p id="status" role="status"></p>
+<script type="module" src="./main.ts"></script></body></html>

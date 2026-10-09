@@ -1,4 +1,6 @@
-import type { Budget, Cart, DecideResponse, DecisionContext, Lane, Verdict } from "@auxo/shared";
+import { randomUUID } from "node:crypto";
+
+import type { Budget, Cart, DecideResponse, Trigger, DecisionContext, Lane, Verdict } from "@auxo/shared";
 
 import type { DecisionRepository } from "../repositories/decision-repository.js";
 import type { SettingsRepository } from "../repositories/settings-repository.js";
@@ -15,16 +17,21 @@ export interface DecisionServiceOptions {
   onDecisionModelError?: (error: unknown) => void;
   ttlSeconds: number;
   now?: () => Date;
+  newDecisionId?: () => string;
 }
 
 export class DecisionService {
   private readonly now: () => Date;
+  private readonly newDecisionId: () => string;
 
   public constructor(private readonly options: DecisionServiceOptions) {
     this.now = options.now ?? (() => new Date());
+    this.newDecisionId = options.newDecisionId ?? randomUUID;
   }
 
-  public async decide(userId: string, cart: Cart): Promise<DecideResponse> {
+  // Every request is analyzed fresh and gets its own decision_id; past
+  // decisions are never reused, so the same cart can get a different answer.
+  public async decide(userId: string, cart: Cart, trigger?: Trigger): Promise<DecideResponse> {
     const now = this.now();
     const [rules, budgets] = this.options.settingsRepository
       ? await Promise.all([
@@ -37,17 +44,6 @@ export class DecisionService {
     const version = this.options.decisionModelProvider
       ? `${baseVersion}:model:${this.options.decisionModelProvider.modelVersion}`
       : baseVersion;
-    const existing = await this.options.repository.findActive(
-      userId,
-      cart.cart_hash,
-      version,
-      now,
-    );
-
-    if (existing) {
-      return existing;
-    }
-
     const policyEvaluation = evaluatePolicyWithContext({ cart, rules, budgets, now });
     const deterministicLane = hasPolicyData ? policyEvaluation.lane : null;
     let modelSignal: DecisionSignal | null = null;
@@ -68,9 +64,10 @@ export class DecisionService {
     const policyLane = modelSignal
       ? maxLane(deterministicLane ?? "L0", modelSignal.lane)
       : deterministicLane ?? (this.options.decisionModelProvider ? "L0" : null);
+    const decisionId = this.newDecisionId();
     const verdict = policyLane
-      ? createPolicyVerdict(cart, userId, policyLane, version)
-      : createStubVerdict(cart, userId);
+      ? createPolicyVerdict(decisionId, policyLane)
+      : createStubVerdict(cart, decisionId);
     const expiresAt = new Date(now.getTime() + this.options.ttlSeconds * 1_000);
     const context = createDecisionContext(
       verdict,
@@ -99,6 +96,7 @@ export class DecisionService {
       context,
       expiresAt: expiresAt.toISOString(),
       createdAt: now.toISOString(),
+      ...(trigger ? { trigger } : {}),
     });
 
     return { ...verdict, context };

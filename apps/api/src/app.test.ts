@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DecideResponseSchema } from "@auxo/shared";
+import { DecideResponseSchema, StoreConfigSchema } from "@auxo/shared";
 
 import { buildApp } from "./application.js";
 import type { AuthService } from "./auth/auth-service.js";
+import { InMemoryDecisionRepository } from "./repositories/decision-repository.js";
+import { InMemoryStoreConfigRepository } from "./repositories/store-config-repository.js";
 
 const openApps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
@@ -63,15 +65,104 @@ describe("POST /v1/decide", () => {
     });
   });
 
-  it("returns the same verdict for the same cart hash", async () => {
+  it("analyzes the same cart again on every request", async () => {
     const app = await buildApp();
     openApps.push(app);
     const payload = { cart: cartWithHashSuffix("2") };
 
-    const first = await app.inject({ method: "POST", url: "/v1/decide", payload });
-    const second = await app.inject({ method: "POST", url: "/v1/decide", payload });
+    const first = (await app.inject({ method: "POST", url: "/v1/decide", payload })).json();
+    const second = (await app.inject({ method: "POST", url: "/v1/decide", payload })).json();
 
-    expect(second.json()).toEqual(first.json());
+    expect(second.decision_id).not.toBe(first.decision_id);
+    expect(second.lane).toBe(first.lane);
+
+    for (const decision of [first, second]) {
+      const event = await app.inject({
+        method: "POST",
+        url: "/v1/events",
+        payload: {
+          event_id: randomUUID(),
+          decision_id: decision.decision_id,
+          action: "left",
+          occurred_at: "2026-10-04T16:00:00.000Z",
+        },
+      });
+      expect(event.statusCode).toBe(201);
+    }
+  });
+
+  it("accepts a trigger and stores it with the decision", async () => {
+    const decisionRepository = new InMemoryDecisionRepository();
+    const app = await buildApp({ decisionRepository });
+    openApps.push(app);
+    const trigger = {
+      intent: "add_to_cart",
+      source: "known",
+      page_type: "product",
+      occurred_at: "2026-10-04T20:00:00.000Z",
+      label: "Add to Cart",
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("4"), trigger },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(decisionRepository.list()[0]?.trigger).toEqual(trigger);
+  });
+
+  it.each(["increase_qty", "decrease_qty", "remove_item", "save_for_later"])("accepts a %s cart-edit trigger", async (intent) => {
+    const decisionRepository = new InMemoryDecisionRepository();
+    const app = await buildApp({ decisionRepository });
+    openApps.push(app);
+    const trigger = { intent, source: "known", page_type: "cart", occurred_at: "2026-10-05T18:00:00.000Z", label: "Delete" };
+
+    const response = await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("1"), trigger } });
+
+    expect(response.statusCode).toBe(200);
+    expect(decisionRepository.list()[0]?.trigger).toEqual(trigger);
+  });
+
+  it("accepts and stores the same_cart tag", async () => {
+    const decisionRepository = new InMemoryDecisionRepository();
+    const app = await buildApp({ decisionRepository });
+    openApps.push(app);
+    const trigger = { intent: "page_view", source: "page", page_type: "cart", occurred_at: "2026-10-05T18:00:00.000Z", same_cart: true };
+
+    const response = await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("1"), trigger } });
+
+    expect(response.statusCode).toBe(200);
+    expect(decisionRepository.list()[0]?.trigger).toEqual(trigger);
+  });
+
+  it("still accepts a decide request without a trigger", async () => {
+    const decisionRepository = new InMemoryDecisionRepository();
+    const app = await buildApp({ decisionRepository });
+    openApps.push(app);
+
+    const response = await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("1") } });
+
+    expect(response.statusCode).toBe(200);
+    expect(decisionRepository.list()[0]?.trigger).toBeUndefined();
+  });
+
+  it("rejects an invalid trigger", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: {
+        cart: cartWithHashSuffix("1"),
+        trigger: { intent: "wishlist", source: "known", page_type: "product", occurred_at: "2026-10-04T20:00:00.000Z" },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
   });
 
   it("rejects an invalid cart", async () => {
@@ -236,6 +327,27 @@ describe("POST /v1/events", () => {
     expect(first.json()).toEqual({ accepted: true, duplicate: false });
     expect(second.statusCode).toBe(200);
     expect(second.json()).toEqual({ accepted: true, duplicate: true });
+  });
+
+  it.each(["removed", "bought"])("accepts a %s event", async (action) => {
+    const app = await buildApp();
+    openApps.push(app);
+    const decisionId = (await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("2") } })).json()
+      .decision_id as string;
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      payload: {
+        event_id: randomUUID(),
+        decision_id: decisionId,
+        action,
+        occurred_at: "2026-10-04T12:00:00.000Z",
+        metadata: { items: [{ name: "Example item", price_minor: 2_500, qty: 1 }], total_minor: 2_500 },
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
   });
 
   it("does not expose another user's decision", async () => {
@@ -441,5 +553,180 @@ describe("budget settings", () => {
     openApps.push(app);
     expect((await app.inject({ method: "GET", url: "/v1/rules" })).statusCode).toBe(401);
     expect((await app.inject({ method: "GET", url: "/v1/budgets" })).statusCode).toBe(401);
+  });
+});
+
+describe("GET /v1/config", () => {
+  const amazon = { id: randomUUID(), domain: "www.amazon.com", enabled: true };
+  const ebay = { id: randomUUID(), domain: "www.ebay.com", enabled: true };
+  const v1 = { buttons: { add_to_cart: ["#add-to-cart-button"] } };
+  const v2 = { buttons: { add_to_cart: ["#add-to-cart-button-v2"] }, selectors: { cart_subtotal: "#sc-subtotal" } };
+
+  async function getConfig(repository: InMemoryStoreConfigRepository, options: Parameters<typeof buildApp>[0] = {}) {
+    const app = await buildApp({ storeConfigRepository: repository, ...options });
+    openApps.push(app);
+    const response = await app.inject({ method: "GET", url: "/v1/config" });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(StoreConfigSchema.safeParse(body).success).toBe(true);
+    return body;
+  }
+
+  it("serves an empty default config when no stores are configured", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/v1/config" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ version: "default", stores: {} });
+  });
+
+  it("serves a store's overrides from its recipe", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: v2 }],
+    });
+
+    const body = await getConfig(repository);
+
+    expect(body.stores).toEqual({ "www.amazon.com": { enabled: true, ...v2 } });
+    expect(body.version).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("serves a store with no enabled recipe as just its switch", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: false, selectors: v1 }],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.amazon.com": { enabled: true } });
+  });
+
+  it("uses the latest enabled recipe version", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [
+        { merchant_id: amazon.id, version: 2, enabled: true, selectors: v2 },
+        { merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 },
+      ],
+    });
+
+    expect((await getConfig(repository)).stores["www.amazon.com"]).toEqual({ enabled: true, ...v2 });
+  });
+
+  it("rolls back to the previous version when the latest recipe is disabled", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [
+        { merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 },
+        { merchant_id: amazon.id, version: 2, enabled: false, selectors: v2 },
+      ],
+    });
+
+    expect((await getConfig(repository)).stores["www.amazon.com"]).toEqual({ enabled: true, ...v1 });
+  });
+
+  it("turns a store off with the merchant switch, even with recipes", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [{ ...amazon, enabled: false }],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 }],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.amazon.com": { enabled: false } });
+  });
+
+  it("skips an invalid recipe without falling back or breaking other stores", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon, ebay],
+      recipes: [
+        { merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 },
+        // page_view isn't a button intent, and enabled belongs to the merchant.
+        { merchant_id: amazon.id, version: 2, enabled: true, selectors: { buttons: { page_view: ["#x"] } } },
+        { merchant_id: ebay.id, version: 1, enabled: true, selectors: v1 },
+      ],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({
+      "www.amazon.com": { enabled: true },
+      "www.ebay.com": { enabled: true, ...v1 },
+    });
+  });
+
+  it.each([
+    ["null", null],
+    ["a string", "#add-to-cart"],
+    ["an enabled key", { enabled: false, ...v1 }],
+    ["an empty selector list", { buttons: { add_to_cart: [] } }],
+  ])("skips a recipe that is %s", async (_label, selectors) => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors }],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.amazon.com": { enabled: true } });
+  });
+
+  it("skips a merchant whose domain can't be a store key", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [{ id: randomUUID(), domain: "  ", enabled: true }, ebay],
+    });
+
+    expect((await getConfig(repository)).stores).toEqual({ "www.ebay.com": { enabled: true } });
+  });
+
+  it("keys stores by lowercase hostname", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [{ ...amazon, domain: "WWW.Amazon.com" }],
+    });
+
+    expect(Object.keys((await getConfig(repository)).stores)).toEqual(["www.amazon.com"]);
+  });
+
+  it("changes the version when an override changes, including a delete", async () => {
+    const repository = new InMemoryStoreConfigRepository({
+      merchants: [amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: v1 }],
+    });
+    const app = await buildApp({ storeConfigRepository: repository });
+    openApps.push(app);
+    const version = async () => (await app.inject({ method: "GET", url: "/v1/config" })).json().version;
+
+    const first = await version();
+    expect(await version()).toBe(first);
+
+    repository.upsertRecipe({ merchant_id: amazon.id, version: 2, enabled: true, selectors: v2 });
+    const second = await version();
+    expect(second).not.toBe(first);
+
+    // Deleting the newest recipe goes back to exactly the first config.
+    repository.deleteRecipe(amazon.id, 2);
+    expect(await version()).toBe(first);
+
+    repository.deleteRecipe(amazon.id, 1);
+    expect(await version()).not.toBe(first);
+  });
+
+  it("keeps the version when the same config is stored in a different order", async () => {
+    const a = new InMemoryStoreConfigRepository({
+      merchants: [amazon, ebay],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: { selectors: { a: "#a", b: "#b" }, buttons: v1.buttons } }],
+    });
+    const b = new InMemoryStoreConfigRepository({
+      merchants: [ebay, amazon],
+      recipes: [{ merchant_id: amazon.id, version: 1, enabled: true, selectors: { buttons: v1.buttons, selectors: { b: "#b", a: "#a" } } }],
+    });
+
+    expect((await getConfig(a)).version).toBe((await getConfig(b)).version);
+  });
+
+  it("requires authentication like the other routes", async () => {
+    const app = await buildApp({ authRequired: true, storeConfigRepository: new InMemoryStoreConfigRepository() });
+    openApps.push(app);
+
+    const response = await app.inject({ method: "GET", url: "/v1/config" });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({ error: { code: "UNAUTHORIZED" } });
   });
 });
