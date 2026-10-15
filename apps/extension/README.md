@@ -3,7 +3,20 @@
 ## Hosted backend connector
 
 Production builds default to https://api-ten-sand-28.vercel.app. Override with
-`WXT_API_BASE_URL=http://127.0.0.1:3001` when testing locally.
+`WXT_API_BASE_URL=http://127.0.0.1:3001` when testing locally. Against a local
+API (127.0.0.1, localhost, ::1), a signed-out extension sends requests without
+a token, and the API (`AUTH_MODE=development`) answers as its development user,
+so local work needs no account:
+
+```bash
+pnpm dev:api
+WXT_API_BASE_URL=http://127.0.0.1:3001 pnpm --filter @auxo/extension build:debug
+```
+
+The extension ID is fixed at `imccalmfnleieeiegnofokldkenplaof` by the public
+`key` in the manifest (`src/extension-key.ts`), whatever folder the build is
+loaded from. Production `CORS_ORIGINS` should be
+`chrome-extension://imccalmfnleieeiegnofokldkenplaof`.
 
 Open the extension's Options page, supply the Supabase project's **public**
 publishable/anon key, and sign in with an existing email/password account.

@@ -27,13 +27,33 @@ export async function configureAuth(url: string, key: string): Promise<void> {
   client = null;
 }
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+// The local API (AUTH_MODE=development) answers unsigned requests as its
+// development user, so signed-out dev work against it needs no account.
+// Remote hosts never get an unsigned request.
+export function isLoopbackRequest(input: RequestInfo | URL): boolean {
+  const href = input instanceof Request ? input.url : String(input);
+  try {
+    return LOOPBACK_HOSTS.has(new URL(href).hostname);
+  } catch {
+    return false;
+  }
+}
+
 // Runs only in the background worker. Refresh on each request when necessary;
 // this also works after Chrome has suspended and restarted the worker.
 export const authenticatedFetch: typeof fetch = async (input, init) => {
   const auth = await authClient();
-  if (!auth) throw new Error("Sign in through Auxo's options page.");
+  if (!auth) {
+    if (isLoopbackRequest(input)) return fetch(input, init);
+    throw new Error("Sign in through Auxo's options page.");
+  }
   const { data, error } = await auth.auth.getSession();
-  if (error || !data.session) throw new Error("Sign in required.");
+  if (error || !data.session) {
+    if (isLoopbackRequest(input)) return fetch(input, init);
+    throw new Error("Sign in required.");
+  }
   const send = (token: string) => {
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${token}`);
