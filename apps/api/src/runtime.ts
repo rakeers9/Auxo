@@ -52,6 +52,7 @@ export function createProductionApp() {
     passTtlSeconds: config.passTtlSeconds,
     rateLimitMax: config.rateLimitMax,
     rateLimitWindowMs: config.rateLimitWindowMs,
+    trustProxy: config.trustProxy,
     ...(config.cloudflareAccountId && config.cloudflareApiToken
       ? {
           decisionModelProvider: new CloudflareClefProvider({

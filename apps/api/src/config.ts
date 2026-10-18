@@ -13,6 +13,8 @@ const EnvironmentSchema = z.object({
   PASS_TTL_SECONDS: z.coerce.number().int().positive().max(86_400).default(600),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().max(10_000).default(120),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().max(3_600_000).default(60_000),
+  // Behind a proxy (Vercel), request.ip must come from X-Forwarded-For.
+  TRUST_PROXY: z.enum(["true", "false"]).default("false"),
   CLOUDFLARE_ACCOUNT_ID: z.string().min(1).optional(),
   CLOUDFLARE_API_TOKEN: z.string().min(1).optional(),
   CLEF_MODEL: z.enum(["clef", "clef-flash"]).default("clef"),
@@ -32,6 +34,7 @@ export interface ApiConfig {
   passTtlSeconds: number;
   rateLimitMax: number;
   rateLimitWindowMs: number;
+  trustProxy: boolean;
   cloudflareAccountId: string | undefined;
   cloudflareApiToken: string | undefined;
   clefModel: "clef" | "clef-flash";
@@ -86,6 +89,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     passTtlSeconds: parsed.PASS_TTL_SECONDS,
     rateLimitMax: parsed.RATE_LIMIT_MAX,
     rateLimitWindowMs: parsed.RATE_LIMIT_WINDOW_MS,
+    trustProxy: parsed.TRUST_PROXY === "true",
     cloudflareAccountId: parsed.CLOUDFLARE_ACCOUNT_ID,
     cloudflareApiToken: parsed.CLOUDFLARE_API_TOKEN,
     clefModel: parsed.CLEF_MODEL,
