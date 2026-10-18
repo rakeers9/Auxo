@@ -19,6 +19,8 @@ export interface OwnedDecision {
   cart: Cart;
   verdict: Verdict;
   createdAt: string;
+  // After this the decision can no longer issue a pass (DECISION_TTL_SECONDS).
+  expiresAt: string;
 }
 
 export interface DecisionRepository {
@@ -45,6 +47,6 @@ export class InMemoryDecisionRepository implements DecisionRepository {
 
   public async findOwned(userId: string, decisionId: string): Promise<OwnedDecision | null> {
     const record = this.records.get(decisionId);
-    return record && record.userId === userId ? { cart: record.cart, verdict: record.verdict, createdAt: record.createdAt } : null;
+    return record && record.userId === userId ? { cart: record.cart, verdict: record.verdict, createdAt: record.createdAt, expiresAt: record.expiresAt } : null;
   }
 }

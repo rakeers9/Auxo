@@ -1,17 +1,25 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { VerdictSchema } from "@auxo/shared";
+import { CartSchema, VerdictSchema } from "@auxo/shared";
+import { z } from "zod";
 
 import type { DecisionRecord, DecisionRepository, OwnedDecision } from "./decision-repository.js";
 
-interface DecisionRow {
-  id: string;
-  lane: string;
-  action: string;
-  template_id: string;
-  cooldown_seconds: number;
-  decision_context: unknown;
-}
+const TimestampSchema = z.string().refine((value) => !Number.isNaN(Date.parse(value)))
+  .transform((value) => new Date(value).toISOString());
+
+// A decisions row as selected by findOwned. Parsed rather than cast so a bad
+// row fails here with a clear error instead of deep in the pass service.
+const OwnedDecisionRowSchema = z.object({
+  id: z.string(),
+  cart: CartSchema,
+  lane: z.string(),
+  action: z.string(),
+  template_id: z.string(),
+  cooldown_seconds: z.number(),
+  created_at: TimestampSchema,
+  expires_at: TimestampSchema,
+});
 
 export class SupabaseDecisionRepository implements DecisionRepository {
   public constructor(private readonly client: SupabaseClient) {}
@@ -60,22 +68,25 @@ export class SupabaseDecisionRepository implements DecisionRepository {
   public async findOwned(userId: string, decisionId: string): Promise<OwnedDecision | null> {
     const { data, error } = await this.client
       .from("decisions")
-      .select("id,cart,lane,action,template_id,cooldown_seconds,created_at")
+      .select("id,cart,lane,action,template_id,cooldown_seconds,created_at,expires_at")
       .eq("id", decisionId)
       .eq("user_id", userId)
-      .maybeSingle<DecisionRow & { cart: unknown; created_at: string }>();
+      .maybeSingle<unknown>();
     if (error) throw new Error("Unable to load the decision.", { cause: error });
     if (!data) return null;
+    const row = OwnedDecisionRowSchema.safeParse(data);
+    if (!row.success) throw new Error("The stored decision is invalid.", { cause: row.error });
     return {
-      cart: data.cart as OwnedDecision["cart"],
+      cart: row.data.cart,
       verdict: VerdictSchema.parse({
-        decision_id: data.id,
-        lane: data.lane,
-        action: data.action,
-        template_id: data.template_id,
-        cooldown_seconds: data.cooldown_seconds,
+        decision_id: row.data.id,
+        lane: row.data.lane,
+        action: row.data.action,
+        template_id: row.data.template_id,
+        cooldown_seconds: row.data.cooldown_seconds,
       }),
-      createdAt: data.created_at,
+      createdAt: row.data.created_at,
+      expiresAt: row.data.expires_at,
     };
   }
 }

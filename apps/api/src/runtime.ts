@@ -28,6 +28,11 @@ export function createProductionApp() {
       })
     : null;
 
+  // In memory, the outcome repository shares the decision and settings
+  // repositories so `bought` events update budget spend like the database does.
+  const memoryDecisions = new InMemoryDecisionRepository();
+  const memorySettings = new InMemorySettingsRepository();
+
   return buildApp({
     corsOrigins: config.corsOrigins,
     logger: true,
@@ -35,13 +40,13 @@ export function createProductionApp() {
     ...(authClient ? { authService: new SupabaseAuthService(authClient) } : {}),
     decisionRepository: serviceClient
       ? new SupabaseDecisionRepository(serviceClient)
-      : new InMemoryDecisionRepository(),
+      : memoryDecisions,
     outcomeRepository: serviceClient
       ? new SupabaseOutcomeRepository(serviceClient)
-      : new InMemoryOutcomeRepository(),
+      : new InMemoryOutcomeRepository({ decisions: memoryDecisions, spend: memorySettings }),
     settingsRepository: serviceClient
       ? new SupabaseSettingsRepository(serviceClient)
-      : new InMemorySettingsRepository(),
+      : memorySettings,
     passRepository: serviceClient
       ? new SupabasePassRepository(serviceClient)
       : new InMemoryPassRepository(),

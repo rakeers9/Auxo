@@ -415,7 +415,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     if (error instanceof PassNotAvailableError) {
       return reply.status(409).send({
-        error: { code: "PASS_NOT_AVAILABLE", message: error.message },
+        error: { code: "PASS_NOT_AVAILABLE", message: error.message, details: { reason: error.reason } },
       });
     }
 
