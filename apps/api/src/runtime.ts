@@ -9,6 +9,8 @@ import { InMemoryPassRepository } from "./repositories/pass-repository.js";
 import { InMemorySettingsRepository } from "./repositories/settings-repository.js";
 import { SupabaseDecisionRepository } from "./repositories/supabase-decision-repository.js";
 import { SupabaseOutcomeRepository } from "./repositories/supabase-outcome-repository.js";
+import { InMemoryHistoryRepository } from "./repositories/history-repository.js";
+import { SupabaseHistoryRepository } from "./repositories/supabase-history-repository.js";
 import { SupabasePassRepository } from "./repositories/supabase-pass-repository.js";
 import { SupabaseSettingsRepository } from "./repositories/supabase-settings-repository.js";
 import { CloudflareClefProvider } from "./services/decision-model-provider.js";
@@ -29,9 +31,11 @@ export function createProductionApp() {
     : null;
 
   // In memory, the outcome repository shares the decision and settings
-  // repositories so `bought` events update budget spend like the database does.
+  // repositories so `bought` events update budget spend like the database does,
+  // and the history repository reads the decisions and outcomes.
   const memoryDecisions = new InMemoryDecisionRepository();
   const memorySettings = new InMemorySettingsRepository();
+  const memoryOutcomes = new InMemoryOutcomeRepository({ decisions: memoryDecisions, spend: memorySettings });
 
   return buildApp({
     corsOrigins: config.corsOrigins,
@@ -43,7 +47,11 @@ export function createProductionApp() {
       : memoryDecisions,
     outcomeRepository: serviceClient
       ? new SupabaseOutcomeRepository(serviceClient)
-      : new InMemoryOutcomeRepository({ decisions: memoryDecisions, spend: memorySettings }),
+      : memoryOutcomes,
+    // Merchant history for /v1/decide (AUX-34), read from the same store.
+    historyRepository: serviceClient
+      ? new SupabaseHistoryRepository(serviceClient)
+      : new InMemoryHistoryRepository({ decisions: memoryDecisions, outcomes: memoryOutcomes }),
     settingsRepository: serviceClient
       ? new SupabaseSettingsRepository(serviceClient)
       : memorySettings,

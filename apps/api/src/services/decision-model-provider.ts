@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { LaneSchema, type Budget, type Cart, type Lane, type Rule } from "@auxo/shared";
+import { LaneSchema, type Budget, type Cart, type DecisionHistory, type Lane, type Rule } from "@auxo/shared";
 
 const DecisionSignalSchema = z.object({
   lane: LaneSchema,
@@ -28,6 +28,8 @@ export interface DecisionModelState {
   rules: Rule[];
   budgets: Budget[];
   deterministicLane: Lane;
+  // The user's recent history at the cart's merchant (AUX-34), when it loaded.
+  history?: DecisionHistory;
 }
 
 export interface DecisionModelProvider {
@@ -72,12 +74,14 @@ export class CloudflareClefProvider implements DecisionModelProvider {
           enabled_rules: state.rules.filter((rule) => rule.enabled),
           active_budgets: state.budgets,
           deterministic_policy_lane: state.deterministicLane,
+          // Null when the history couldn't be loaded in time.
+          merchant_history: state.history ?? null,
         },
         questions: {
           intervention_lane: {
             type: "choice",
             instructions:
-              "Choose the appropriate shopping intervention lane. Prefer the least restrictive lane that still addresses likely impulsive or harmful spending. Never weaken the deterministic policy lane.",
+              "Choose the appropriate shopping intervention lane. Prefer the least restrictive lane that still addresses likely impulsive or harmful spending. Never weaken the deterministic policy lane. merchant_history, when present, summarizes the user's last window_days at this merchant: purchases, spent_minor (cart currency), check-ins with the share they regretted (regret_rate), and the share of paused or blocked decisions they overrode (override_rate); null rates mean no data.",
             criteria: {
               L0: "Allow silently; no meaningful intervention is warranted.",
               L1: "Allow with a light awareness banner.",

@@ -25,6 +25,10 @@ import {
   type OutcomeRepository,
 } from "./repositories/outcome-repository.js";
 import { DecisionService } from "./services/decision-service.js";
+import {
+  InMemoryHistoryRepository,
+  type HistoryRepository,
+} from "./repositories/history-repository.js";
 import { DecisionNotFoundError, OutcomeService } from "./services/outcome-service.js";
 import {
   InMemorySettingsRepository,
@@ -60,6 +64,10 @@ export interface BuildAppOptions {
   authService?: AuthService;
   decisionRepository?: DecisionRepository;
   outcomeRepository?: OutcomeRepository;
+  // Defaults to reading the in-memory decision and outcome repositories when
+  // both are in memory; otherwise decisions carry no history unless given one.
+  historyRepository?: HistoryRepository;
+  historyTimeoutMs?: number;
   settingsRepository?: SettingsRepository;
   decisionTtlSeconds?: number;
   decisionModelProvider?: DecisionModelProvider;
@@ -96,6 +104,17 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const decisionRepository = options.decisionRepository ?? new InMemoryDecisionRepository();
   const defaultSettingsRepository = options.settingsRepository ? null : new InMemorySettingsRepository();
   const settingsRepository = options.settingsRepository ?? defaultSettingsRepository!;
+  const outcomeRepository = options.outcomeRepository ?? new InMemoryOutcomeRepository({
+    decisions: decisionRepository,
+    // `bought` charges budgets only when the settings are in memory too;
+    // runtime.ts wires the Supabase repositories together itself.
+    ...(defaultSettingsRepository ? { spend: defaultSettingsRepository } : {}),
+  });
+  const historyRepository = options.historyRepository ?? (
+    decisionRepository instanceof InMemoryDecisionRepository && outcomeRepository instanceof InMemoryOutcomeRepository
+      ? new InMemoryHistoryRepository({ decisions: decisionRepository, outcomes: outcomeRepository })
+      : undefined
+  );
   const decisionService = new DecisionService({
     repository: decisionRepository,
     settingsRepository,
@@ -104,17 +123,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       : {}),
     onDecisionModelError: (error) =>
       app.log.warn({ error }, "Decision model evaluation failed; using fallback"),
+    ...(historyRepository ? { historyRepository } : {}),
+    ...(options.historyTimeoutMs !== undefined ? { historyTimeoutMs: options.historyTimeoutMs } : {}),
+    onHistoryError: (error) =>
+      app.log.warn({ error }, "Merchant history unavailable; deciding without it"),
     ttlSeconds: options.decisionTtlSeconds ?? 86_400,
   });
-  const outcomeService = new OutcomeService(
-    decisionRepository,
-    options.outcomeRepository ?? new InMemoryOutcomeRepository({
-      decisions: decisionRepository,
-      // `bought` charges budgets only when the settings are in memory too;
-      // runtime.ts wires the Supabase repositories together itself.
-      ...(defaultSettingsRepository ? { spend: defaultSettingsRepository } : {}),
-    }),
-  );
+  const outcomeService = new OutcomeService(decisionRepository, outcomeRepository);
   const settingsService = new SettingsService(
     settingsRepository,
   );

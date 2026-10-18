@@ -65,6 +65,15 @@ export class InMemoryOutcomeRepository implements OutcomeRepository {
     this.checkIns.set(checkIn.decision_id, { userId, checkIn });
     return "created";
   }
+
+  // Read by InMemoryHistoryRepository (AUX-34).
+  public listEvents(): Array<{ userId: string; event: DecisionEvent }> {
+    return [...this.events.values()];
+  }
+
+  public listCheckIns(): Array<{ userId: string; checkIn: CheckIn }> {
+    return [...this.checkIns.values()];
+  }
 }
 
 // The UTC calendar date of an ISO timestamp with any offset, matching how

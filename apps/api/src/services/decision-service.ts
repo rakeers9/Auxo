@@ -6,6 +6,7 @@ import {
   type Cart,
   type DecideResponse,
   type DecisionContext,
+  type DecisionHistory,
   type Rule,
   type Trigger,
   type TriggerIntent,
@@ -13,12 +14,21 @@ import {
 } from "@auxo/shared";
 
 import type { DecisionRecord, DecisionRepository } from "../repositories/decision-repository.js";
+import { HISTORY_WINDOW_DAYS, type HistoryRepository } from "../repositories/history-repository.js";
 import type { SettingsRepository } from "../repositories/settings-repository.js";
 import type { DecisionModelProvider, DecisionSignal } from "./decision-model-provider.js";
 import { createPolicyVerdict, evaluatePolicyWithContext, maxLane, policyVersion, type PolicyEvaluation } from "./policy-engine.js";
 import { stubLane } from "./stub-decision.js";
 
 export const STUB_POLICY_VERSION = "stub-v1";
+export const DEFAULT_HISTORY_TIMEOUT_MS = 300;
+
+export class HistoryTimeoutError extends Error {
+  public constructor(timeoutMs: number) {
+    super(`Merchant history took longer than ${timeoutMs}ms; deciding without it.`);
+    this.name = "HistoryTimeoutError";
+  }
+}
 
 type DecisiveFactor = DecisionContext["decisive_factors"][number];
 
@@ -33,6 +43,12 @@ export interface DecisionServiceOptions {
   settingsRepository?: SettingsRepository;
   decisionModelProvider?: DecisionModelProvider;
   onDecisionModelError?: (error: unknown) => void;
+  // AUX-34: the user's recent history at the cart's merchant. Optional and
+  // best effort: on error or after historyTimeoutMs the decision goes ahead
+  // without it and onHistoryError is told why.
+  historyRepository?: HistoryRepository;
+  historyTimeoutMs?: number;
+  onHistoryError?: (error: unknown) => void;
   ttlSeconds: number;
   now?: () => Date;
   newDecisionId?: () => string;
@@ -60,6 +76,10 @@ export class DecisionService {
   // decisions are never reused, so the same cart can get a different answer.
   public async decide(userId: string, cart: Cart, trigger?: Trigger): Promise<DecideResponse> {
     const now = this.now();
+    const reducing = isReducingTrigger(trigger);
+    // Started before the settings are read so the two run concurrently. A
+    // reducing trigger always gets L0, so its history isn't needed.
+    const historyPromise = reducing ? Promise.resolve(null) : this.loadHistory(userId, cart, now);
     const [rules, budgets] = this.options.settingsRepository
       ? await Promise.all([
           this.options.settingsRepository.listRules(userId),
@@ -74,7 +94,7 @@ export class DecisionService {
     const decisionId = this.newDecisionId();
     let outcome: Outcome;
 
-    if (isReducingTrigger(trigger)) {
+    if (reducing) {
       // AUX-30: lowering the cart (decrease qty, remove, save for later) is
       // always allowed. No rule, budget, or model can raise the lane, so the
       // model isn't asked. The decision is still recorded fresh.
@@ -87,7 +107,8 @@ export class DecisionService {
         modelVersion: "v1",
       };
     } else if (hasPolicyData || this.options.decisionModelProvider) {
-      outcome = await this.decideWithPolicyAndModel(decisionId, cart, rules, budgets, hasPolicyData, baseVersion, policyEvaluation);
+      const history = await historyPromise;
+      outcome = await this.decideWithPolicyAndModel(decisionId, cart, rules, budgets, history, hasPolicyData, baseVersion, policyEvaluation);
     } else {
       // No rules, no budgets, no model: the stub picks the lane from cart_hash,
       // so it is the decisive factor whatever lane it picked (L0 included).
@@ -105,7 +126,8 @@ export class DecisionService {
     }
 
     const expiresAt = new Date(now.getTime() + this.options.ttlSeconds * 1_000);
-    const context = createDecisionContext(outcome, cart, budgets, now, policyEvaluation);
+    const history = await historyPromise;
+    const context = createDecisionContext(outcome, cart, budgets, now, policyEvaluation, history);
 
     await this.options.repository.save({
       userId,
@@ -124,11 +146,37 @@ export class DecisionService {
     return { ...outcome.verdict, context };
   }
 
+  // Never throws and never waits longer than historyTimeoutMs: history only
+  // informs the model and the context, so a decision must not depend on it.
+  private async loadHistory(userId: string, cart: Cart, now: Date): Promise<DecisionHistory | null> {
+    const repository = this.options.historyRepository;
+    if (!repository) return null;
+    const timeoutMs = this.options.historyTimeoutMs ?? DEFAULT_HISTORY_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new HistoryTimeoutError(timeoutMs)), timeoutMs);
+      });
+      // Called synchronously so the query starts before the settings reads;
+      // a synchronous throw lands in the catch below.
+      const lookup = repository.merchantHistory(userId, { merchant: cart.merchant, currency: cart.currency, now, windowDays: HISTORY_WINDOW_DAYS });
+      // A lookup that fails after the timeout has nobody waiting on it.
+      lookup.catch(() => undefined);
+      return await Promise.race([lookup, timeout]);
+    } catch (error) {
+      this.options.onHistoryError?.(error);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async decideWithPolicyAndModel(
     decisionId: string,
     cart: Cart,
     rules: Rule[],
     budgets: Budget[],
+    history: DecisionHistory | null,
     hasPolicyData: boolean,
     baseVersion: string,
     evaluation: PolicyEvaluation,
@@ -140,7 +188,7 @@ export class DecisionService {
 
     if (provider) {
       try {
-        modelSignal = await provider.evaluate({ cart, rules, budgets, deterministicLane });
+        modelSignal = await provider.evaluate({ cart, rules, budgets, deterministicLane, ...(history ? { history } : {}) });
       } catch (error) {
         this.options.onDecisionModelError?.(error);
       }
@@ -174,6 +222,7 @@ function createDecisionContext(
   budgets: Budget[],
   now: Date,
   evaluation: PolicyEvaluation,
+  history: DecisionHistory | null,
 ): DecisionContext {
   const { verdict, modelSignal } = outcome;
   const activeBudget = budgets
@@ -208,6 +257,7 @@ function createDecisionContext(
       : verdict.action === "pause"
         ? ["leave", "save_for_later", "continue"]
         : ["leave", "save_for_later", "override_after_cooldown"],
+    ...(history ? { history } : {}),
   };
 }
 
