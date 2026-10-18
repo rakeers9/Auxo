@@ -1,14 +1,32 @@
 import { randomUUID } from "node:crypto";
 
-import type { Budget, Cart, DecideResponse, Trigger, DecisionContext, Lane, Verdict } from "@auxo/shared";
+import {
+  REDUCING_INTENTS,
+  type Budget,
+  type Cart,
+  type DecideResponse,
+  type DecisionContext,
+  type Rule,
+  type Trigger,
+  type TriggerIntent,
+  type Verdict,
+} from "@auxo/shared";
 
-import type { DecisionRepository } from "../repositories/decision-repository.js";
+import type { DecisionRecord, DecisionRepository } from "../repositories/decision-repository.js";
 import type { SettingsRepository } from "../repositories/settings-repository.js";
 import type { DecisionModelProvider, DecisionSignal } from "./decision-model-provider.js";
 import { createPolicyVerdict, evaluatePolicyWithContext, maxLane, policyVersion, type PolicyEvaluation } from "./policy-engine.js";
-import { createStubVerdict } from "./stub-decision.js";
+import { stubLane } from "./stub-decision.js";
 
 export const STUB_POLICY_VERSION = "stub-v1";
+
+type DecisiveFactor = DecisionContext["decisive_factors"][number];
+
+const REDUCING = new Set<TriggerIntent>(REDUCING_INTENTS);
+
+export function isReducingTrigger(trigger: Trigger | undefined): boolean {
+  return trigger !== undefined && REDUCING.has(trigger.intent);
+}
 
 export interface DecisionServiceOptions {
   repository: DecisionRepository;
@@ -18,6 +36,15 @@ export interface DecisionServiceOptions {
   ttlSeconds: number;
   now?: () => Date;
   newDecisionId?: () => string;
+}
+
+interface Outcome {
+  verdict: Verdict;
+  decisiveFactors: DecisiveFactor[];
+  modelSignal: DecisionSignal | null;
+  policyVersion: string;
+  modelProvider: DecisionRecord["modelProvider"];
+  modelVersion: string;
 }
 
 export class DecisionService {
@@ -41,85 +68,117 @@ export class DecisionService {
       : [[], []];
     const hasPolicyData = rules.length > 0 || budgets.length > 0;
     const baseVersion = hasPolicyData ? policyVersion(rules, budgets) : STUB_POLICY_VERSION;
-    const version = this.options.decisionModelProvider
-      ? `${baseVersion}:model:${this.options.decisionModelProvider.modelVersion}`
-      : baseVersion;
+    // Evaluated even for a reducing trigger, so matched rules and the budget
+    // still show up in the context for information.
     const policyEvaluation = evaluatePolicyWithContext({ cart, rules, budgets, now });
-    const deterministicLane = hasPolicyData ? policyEvaluation.lane : null;
-    let modelSignal: DecisionSignal | null = null;
+    const decisionId = this.newDecisionId();
+    let outcome: Outcome;
 
-    if (this.options.decisionModelProvider) {
-      try {
-        modelSignal = await this.options.decisionModelProvider.evaluate({
-          cart,
-          rules,
-          budgets,
-          deterministicLane: deterministicLane ?? "L0",
-        });
-      } catch (error) {
-        this.options.onDecisionModelError?.(error);
-      }
+    if (isReducingTrigger(trigger)) {
+      // AUX-30: lowering the cart (decrease qty, remove, save for later) is
+      // always allowed. No rule, budget, or model can raise the lane, so the
+      // model isn't asked. The decision is still recorded fresh.
+      outcome = {
+        verdict: createPolicyVerdict(decisionId, "L0"),
+        decisiveFactors: [{ code: "trigger.reducing", source: "policy", lane: "L0" }],
+        modelSignal: null,
+        policyVersion: baseVersion,
+        modelProvider: "policy-engine",
+        modelVersion: "v1",
+      };
+    } else if (hasPolicyData || this.options.decisionModelProvider) {
+      outcome = await this.decideWithPolicyAndModel(decisionId, cart, rules, budgets, hasPolicyData, baseVersion, policyEvaluation);
+    } else {
+      // No rules, no budgets, no model: the stub picks the lane from cart_hash,
+      // so it is the decisive factor whatever lane it picked (L0 included).
+      // `no_policy_match` is kept for when the policy engine ran and matched
+      // nothing.
+      const lane = stubLane(cart);
+      outcome = {
+        verdict: createPolicyVerdict(decisionId, lane),
+        decisiveFactors: [{ code: "stub.hash", source: "policy", lane }],
+        modelSignal: null,
+        policyVersion: baseVersion,
+        modelProvider: "stub",
+        modelVersion: "deterministic-v1",
+      };
     }
 
-    const policyLane = modelSignal
-      ? maxLane(deterministicLane ?? "L0", modelSignal.lane)
-      : deterministicLane ?? (this.options.decisionModelProvider ? "L0" : null);
-    const decisionId = this.newDecisionId();
-    const verdict = policyLane
-      ? createPolicyVerdict(decisionId, policyLane)
-      : createStubVerdict(cart, decisionId);
     const expiresAt = new Date(now.getTime() + this.options.ttlSeconds * 1_000);
-    const context = createDecisionContext(
-      verdict,
-      cart,
-      budgets,
-      now,
-      policyEvaluation,
-      modelSignal,
-      deterministicLane,
-    );
+    const context = createDecisionContext(outcome, cart, budgets, now, policyEvaluation);
 
     await this.options.repository.save({
       userId,
       cart,
-      verdict,
-      policyVersion: version,
-      modelProvider: modelSignal
-        ? "cloudflare-clef"
-        : this.options.decisionModelProvider
-          ? "model-fallback"
-          : hasPolicyData
-            ? "policy-engine"
-            : "stub",
-      modelVersion: modelSignal?.model ?? (hasPolicyData ? "v1" : "deterministic-v1"),
-      ...(modelSignal ? { modelOutput: modelSignal } : {}),
+      verdict: outcome.verdict,
+      policyVersion: outcome.policyVersion,
+      modelProvider: outcome.modelProvider,
+      modelVersion: outcome.modelVersion,
+      ...(outcome.modelSignal ? { modelOutput: outcome.modelSignal } : {}),
       context,
       expiresAt: expiresAt.toISOString(),
       createdAt: now.toISOString(),
       ...(trigger ? { trigger } : {}),
     });
 
-    return { ...verdict, context };
+    return { ...outcome.verdict, context };
+  }
+
+  private async decideWithPolicyAndModel(
+    decisionId: string,
+    cart: Cart,
+    rules: Rule[],
+    budgets: Budget[],
+    hasPolicyData: boolean,
+    baseVersion: string,
+    evaluation: PolicyEvaluation,
+  ): Promise<Outcome> {
+    // With no rules or budgets the engine matches nothing, so its lane is L0.
+    const deterministicLane = evaluation.lane;
+    const provider = this.options.decisionModelProvider;
+    let modelSignal: DecisionSignal | null = null;
+
+    if (provider) {
+      try {
+        modelSignal = await provider.evaluate({ cart, rules, budgets, deterministicLane });
+      } catch (error) {
+        this.options.onDecisionModelError?.(error);
+      }
+    }
+
+    const lane = modelSignal ? maxLane(deterministicLane, modelSignal.lane) : deterministicLane;
+    const decisiveFactors: DecisiveFactor[] = evaluation.factors.map(({ code, source, lane: factorLane }) => ({
+      code,
+      source,
+      lane: factorLane,
+    }));
+    // Whenever the model is stricter than the policy, say so, with or without rules.
+    if (modelSignal && lane !== deterministicLane) {
+      decisiveFactors.push({ code: "model.escalation", source: "model", lane: modelSignal.lane });
+    }
+
+    return {
+      verdict: createPolicyVerdict(decisionId, lane),
+      decisiveFactors,
+      modelSignal,
+      policyVersion: provider ? `${baseVersion}:model:${provider.modelVersion}` : baseVersion,
+      modelProvider: modelSignal ? "cloudflare-clef" : provider ? "model-fallback" : "policy-engine",
+      modelVersion: modelSignal?.model ?? (hasPolicyData ? "v1" : "deterministic-v1"),
+    };
   }
 }
 
 function createDecisionContext(
-  verdict: Verdict,
+  outcome: Outcome,
   cart: Cart,
   budgets: Budget[],
   now: Date,
   evaluation: PolicyEvaluation,
-  modelSignal: DecisionSignal | null,
-  deterministicLane: Lane | null,
 ): DecisionContext {
+  const { verdict, modelSignal } = outcome;
   const activeBudget = budgets
     .filter((budget) => budget.currency === cart.currency && budget.period_start <= dateOnly(now) && budget.period_end >= dateOnly(now))
     .sort((left, right) => (right.spent_minor + cart.total_minor) / Math.max(right.limit_minor, 1) - (left.spent_minor + cart.total_minor) / Math.max(left.limit_minor, 1))[0];
-  const modelEscalated = modelSignal && deterministicLane !== null && maxLane(deterministicLane, modelSignal.lane) !== deterministicLane;
-  const decisiveFactors: DecisionContext["decisive_factors"] = evaluation.factors.map(
-    ({ code, source, lane }) => ({ code, source, lane }),
-  );
-  if (modelEscalated) decisiveFactors.push({ code: "model.escalation", source: "model", lane: modelSignal.lane });
 
   return {
     decision_id: verdict.decision_id,
@@ -143,7 +202,7 @@ function createDecisionContext(
     model_signal: modelSignal
       ? { provider: "cloudflare-clef", model: modelSignal.model, suggested_lane: modelSignal.lane, confidence: modelSignal.confidence }
       : null,
-    decisive_factors: decisiveFactors,
+    decisive_factors: outcome.decisiveFactors,
     available_actions: verdict.action === "allow"
       ? ["continue"]
       : verdict.action === "pause"
