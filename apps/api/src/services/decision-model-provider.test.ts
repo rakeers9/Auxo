@@ -61,4 +61,29 @@ describe("CloudflareClefProvider", () => {
     });
     await expect(provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0" })).rejects.toThrow("503");
   });
+
+  it("rejects a lane outside L0-L4", async () => {
+    const provider = new CloudflareClefProvider({
+      accountId: "account-id",
+      apiToken: "test-token",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            result: {
+              model: "clef",
+              answers: {
+                intervention_lane: {
+                  type: "choice",
+                  choice: "L5",
+                  confidence: 0.5,
+                  probabilities: { L0: 0.1, L1: 0.1, L2: 0.1, L3: 0.1, L4: 0.1 },
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+    await expect(provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0" })).rejects.toThrow();
+  });
 });

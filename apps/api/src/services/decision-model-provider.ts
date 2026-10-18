@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-import type { Budget, Cart, Lane, Rule } from "@auxo/shared";
+import { LaneSchema, type Budget, type Cart, type Lane, type Rule } from "@auxo/shared";
 
 const DecisionSignalSchema = z.object({
-  lane: z.enum(["L0", "L1", "L2", "L3", "L4"]),
+  lane: LaneSchema,
   confidence: z.number().min(0).max(1),
-  probabilities: z.record(z.enum(["L0", "L1", "L2", "L3", "L4"]), z.number().min(0).max(1)),
+  probabilities: z.record(LaneSchema, z.number().min(0).max(1)),
   model: z.string().min(1),
 });
 
@@ -14,12 +14,9 @@ const ClefResultSchema = z.object({
   answers: z.object({
     intervention_lane: z.object({
       type: z.literal("choice"),
-      choice: z.enum(["L0", "L1", "L2", "L3", "L4"]),
+      choice: LaneSchema,
       confidence: z.number().min(0).max(1),
-      probabilities: z.record(
-        z.enum(["L0", "L1", "L2", "L3", "L4"]),
-        z.number().min(0).max(1),
-      ),
+      probabilities: z.record(LaneSchema, z.number().min(0).max(1)),
     }),
   }),
 });

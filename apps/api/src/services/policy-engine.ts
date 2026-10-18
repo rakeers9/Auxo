@@ -1,17 +1,36 @@
 import { createHash } from "node:crypto";
 
-import type { Budget, Cart, DecisionReasonCode, Lane, Rule, Verdict, VerdictAction } from "@auxo/shared";
+import {
+  RuleConfigurationSchemas,
+  type Budget,
+  type Cart,
+  type DecisionReasonCode,
+  type Lane,
+  type Rule,
+  type RuleType,
+  type Verdict,
+  type VerdictAction,
+} from "@auxo/shared";
 
 const LANE_RANK: Record<Lane, number> = { L0: 0, L1: 1, L2: 2, L3: 3, L4: 4 };
-const LANE_POLICY: Record<
+
+// The one place a lane maps to its verdict fields (the stub uses it through
+// createPolicyVerdict).
+const LANE_POLICY: Readonly<Record<
   Lane,
   { action: VerdictAction; cooldownSeconds: number; templateId: string }
-> = {
+>> = {
   L0: { action: "allow", cooldownSeconds: 0, templateId: "l0-pass" },
   L1: { action: "allow", cooldownSeconds: 0, templateId: "l1-banner" },
   L2: { action: "pause", cooldownSeconds: 60, templateId: "l2-pause" },
   L3: { action: "block", cooldownSeconds: 300, templateId: "l3-block" },
   L4: { action: "block", cooldownSeconds: 900, templateId: "l4-block" },
+};
+
+const RULE_REASON_CODES: Record<RuleType, DecisionReasonCode> = {
+  cart_total: "rule.cart_total",
+  merchant: "rule.merchant",
+  item_keyword: "rule.item_keyword",
 };
 
 export interface PolicyState {
@@ -46,7 +65,7 @@ export function evaluatePolicyWithContext(state: PolicyState): PolicyEvaluation 
     const matchedLane = evaluateRule(rule, state.cart);
     if (matchedLane) {
       lane = maxLane(lane, matchedLane);
-      factors.push({ code: `rule.${rule.rule_type}` as DecisionReasonCode, source: "rule", lane: matchedLane, rule });
+      factors.push({ code: RULE_REASON_CODES[rule.rule_type], source: "rule", lane: matchedLane, rule });
     }
   }
 
@@ -106,41 +125,32 @@ export function policyVersion(rules: Rule[], budgets: Budget[]): string {
   return `policy-v1:${createHash("sha256").update(fingerprint).digest("hex").slice(0, 16)}`;
 }
 
+// A rule whose stored configuration doesn't match its type's schema (or whose
+// type is unknown) is ignored rather than failing the decision.
 function evaluateRule(rule: Rule, cart: Cart): Lane | null {
-  const lane = configuredLane(rule.configuration);
-  if (!lane) return null;
-
-  if (rule.rule_type === "cart_total") {
-    const threshold = rule.configuration.threshold_minor;
-    return typeof threshold === "number" && Number.isSafeInteger(threshold) && cart.total_minor >= threshold
-      ? lane
-      : null;
+  switch (rule.rule_type) {
+    case "cart_total": {
+      const parsed = RuleConfigurationSchemas.cart_total.safeParse(rule.configuration);
+      if (!parsed.success) return null;
+      return cart.total_minor >= parsed.data.threshold_minor ? parsed.data.lane : null;
+    }
+    case "merchant": {
+      const parsed = RuleConfigurationSchemas.merchant.safeParse(rule.configuration);
+      if (!parsed.success) return null;
+      const merchant = cart.merchant.toLowerCase();
+      return parsed.data.merchants.some((candidate) => candidate.toLowerCase() === merchant) ? parsed.data.lane : null;
+    }
+    case "item_keyword": {
+      const parsed = RuleConfigurationSchemas.item_keyword.safeParse(rule.configuration);
+      if (!parsed.success) return null;
+      const keywords = parsed.data.keywords.map((keyword) => keyword.toLowerCase());
+      return cart.items.some((item) => keywords.some((keyword) => item.name.toLowerCase().includes(keyword)))
+        ? parsed.data.lane
+        : null;
+    }
+    default:
+      return null;
   }
-
-  if (rule.rule_type === "merchant") {
-    const merchants = stringArray(rule.configuration.merchants);
-    return merchants.some((merchant) => merchant.toLowerCase() === cart.merchant.toLowerCase())
-      ? lane
-      : null;
-  }
-
-  if (rule.rule_type === "item_keyword") {
-    const keywords = stringArray(rule.configuration.keywords).map((keyword) => keyword.toLowerCase());
-    return cart.items.some((item) => keywords.some((keyword) => item.name.toLowerCase().includes(keyword)))
-      ? lane
-      : null;
-  }
-
-  return null;
-}
-
-function configuredLane(configuration: Record<string, unknown>): Lane | null {
-  const value = configuration.lane;
-  return typeof value === "string" && value in LANE_RANK ? (value as Lane) : null;
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
 }
 
 export function maxLane(left: Lane, right: Lane): Lane {
