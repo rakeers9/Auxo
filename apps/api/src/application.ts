@@ -94,7 +94,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const corsOrigins = options.corsOrigins ?? [];
   const authRequired = options.authRequired ?? false;
   const decisionRepository = options.decisionRepository ?? new InMemoryDecisionRepository();
-  const settingsRepository = options.settingsRepository ?? new InMemorySettingsRepository();
+  const defaultSettingsRepository = options.settingsRepository ? null : new InMemorySettingsRepository();
+  const settingsRepository = options.settingsRepository ?? defaultSettingsRepository!;
   const decisionService = new DecisionService({
     repository: decisionRepository,
     settingsRepository,
@@ -107,7 +108,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
   const outcomeService = new OutcomeService(
     decisionRepository,
-    options.outcomeRepository ?? new InMemoryOutcomeRepository(),
+    options.outcomeRepository ?? new InMemoryOutcomeRepository({
+      decisions: decisionRepository,
+      // `bought` charges budgets only when the settings are in memory too;
+      // runtime.ts wires the Supabase repositories together itself.
+      ...(defaultSettingsRepository ? { spend: defaultSettingsRepository } : {}),
+    }),
   );
   const settingsService = new SettingsService(
     settingsRepository,

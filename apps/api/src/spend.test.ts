@@ -126,6 +126,16 @@ describe("spend tracking from bought events", () => {
     expect(third.lane).toBe("L4");
   });
 
+  it("tracks spend with buildApp's default in-memory repositories", async () => {
+    const instance = buildApp({ authRequired: true, authService });
+    openApps.push(instance);
+    const budget = await createBudget(instance, { currency: "USD", limit_minor: 10_000, period_start: "2026-10-01", period_end: "2026-10-31" });
+    const decision = await decide(instance, 3_000);
+
+    expect((await sendEvent(instance, decision.decision_id, "bought")).statusCode).toBe(201);
+    expect((await budgets(instance)).get(budget.id)).toBe(3_000);
+  });
+
   it("counts one purchase per decision however often bought is sent", async () => {
     const instance = app();
     const budget = await createBudget(instance, { currency: "USD", limit_minor: 10_000, period_start: "2026-10-01", period_end: "2026-10-31" });
