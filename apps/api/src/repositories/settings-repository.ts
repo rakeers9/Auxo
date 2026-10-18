@@ -19,7 +19,21 @@ export interface SettingsRepository {
   deleteBudget(userId: string, budgetId: string): Promise<boolean>;
 }
 
-export class InMemorySettingsRepository implements SettingsRepository {
+export interface PurchaseSpend {
+  currency: string;
+  amountMinor: number;
+  // YYYY-MM-DD (UTC) of the purchase; budgets whose period contains it are charged.
+  occurredOn: string;
+}
+
+// Adds a purchase to the user's matching budgets. The Supabase version of this
+// lives in the record_decision_event database function, so that the event
+// insert and the increment happen in one transaction.
+export interface SpendLedger {
+  recordSpend(userId: string, spend: PurchaseSpend): Promise<void>;
+}
+
+export class InMemorySettingsRepository implements SettingsRepository, SpendLedger {
   private readonly rules = new Map<string, { userId: string; value: Rule }>();
   private readonly budgets = new Map<string, { userId: string; value: Budget }>();
 
@@ -83,5 +97,22 @@ export class InMemorySettingsRepository implements SettingsRepository {
   public async deleteBudget(userId: string, budgetId: string): Promise<boolean> {
     const row = this.budgets.get(budgetId);
     return !!row && row.userId === userId && this.budgets.delete(budgetId);
+  }
+
+  public async recordSpend(userId: string, spend: PurchaseSpend): Promise<void> {
+    for (const row of this.budgets.values()) {
+      if (
+        row.userId === userId &&
+        row.value.currency === spend.currency &&
+        row.value.period_start <= spend.occurredOn &&
+        row.value.period_end >= spend.occurredOn
+      ) {
+        row.value = {
+          ...row.value,
+          spent_minor: row.value.spent_minor + spend.amountMinor,
+          updated_at: new Date().toISOString(),
+        };
+      }
+    }
   }
 }
