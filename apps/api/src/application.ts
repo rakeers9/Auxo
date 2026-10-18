@@ -9,6 +9,7 @@ import {
   CreateRuleSchema,
   DecideRequestSchema,
   DecisionEventSchema,
+  RuleConfigurationSchemas,
   UpdateBudgetSchema,
   UpdateRuleSchema,
 } from "@auxo/shared";
@@ -38,8 +39,19 @@ import {
   type StoreConfigRepository,
 } from "./repositories/store-config-repository.js";
 import { StoreConfigService } from "./services/store-config-service.js";
+import {
+  InMemoryRateLimitStore,
+  RateLimiter,
+  rateLimitKey,
+  type RateLimitStore,
+} from "./rate-limit.js";
 
 const DEVELOPMENT_USER_ID = "00000000-0000-4000-8000-000000000001";
+
+// Cap on an event's `metadata`, measured as UTF-8 bytes of its JSON. Metadata
+// carries item lists for removed/bought events, so leave room for a few dozen
+// items while keeping arbitrary blobs out of the outcomes table.
+export const MAX_EVENT_METADATA_BYTES = 16 * 1024;
 
 export interface BuildAppOptions {
   corsOrigins?: string[];
@@ -56,6 +68,10 @@ export interface BuildAppOptions {
   storeConfigRepository?: StoreConfigRepository;
   rateLimitMax?: number;
   rateLimitWindowMs?: number;
+  rateLimitStore?: RateLimitStore;
+  // Trust X-Forwarded-For for request.ip. Needed behind Vercel's proxy, where
+  // the socket address is the proxy's, not the client's.
+  trustProxy?: boolean;
 }
 
 function bearerToken(request: FastifyRequest): string | null {
@@ -70,7 +86,11 @@ function bearerToken(request: FastifyRequest): string | null {
 }
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: options.logger ?? false, bodyLimit: 64 * 1024 });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    bodyLimit: 64 * 1024,
+    trustProxy: options.trustProxy ?? false,
+  });
   const corsOrigins = options.corsOrigins ?? [];
   const authRequired = options.authRequired ?? false;
   const decisionRepository = options.decisionRepository ?? new InMemoryDecisionRepository();
@@ -101,17 +121,29 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     options.storeConfigRepository ?? new InMemoryStoreConfigRepository(),
     (entry) => app.log.warn({ entry }, "Skipped a store config entry"),
   );
-  const rateLimitMax = options.rateLimitMax ?? 120;
-  const rateLimitWindowMs = options.rateLimitWindowMs ?? 60_000;
-  const requestWindows = new Map<string, { startedAt: number; count: number }>();
+  const rateLimiter = new RateLimiter(
+    options.rateLimitStore ?? new InMemoryRateLimitStore(),
+    options.rateLimitMax ?? 120,
+    options.rateLimitWindowMs ?? 60_000,
+  );
 
   void app.register(cors, {
     origin: corsOrigins.length === 0 ? true : corsOrigins,
   });
 
-  async function authenticate(request: FastifyRequest): Promise<AuthenticatedUser | null> {
-    const token = bearerToken(request);
+  // One auth lookup per request: the rate limiter and the route share it.
+  const authentications = new WeakMap<FastifyRequest, Promise<AuthenticatedUser | null>>();
 
+  function authenticate(request: FastifyRequest): Promise<AuthenticatedUser | null> {
+    let authentication = authentications.get(request);
+    if (!authentication) {
+      authentication = authenticateToken(bearerToken(request));
+      authentications.set(request, authentication);
+    }
+    return authentication;
+  }
+
+  async function authenticateToken(token: string | null): Promise<AuthenticatedUser | null> {
     if (!token) {
       return authRequired ? null : { id: DEVELOPMENT_USER_ID };
     }
@@ -122,6 +154,25 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
     return options.authService.authenticate(token);
   }
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.routeOptions.url === "/health") return;
+    // Only a bearer token identifies a user. The development user (no token)
+    // stands in for every local caller, so it is limited by IP instead.
+    const user = bearerToken(request) ? await authenticate(request) : null;
+    let decision;
+    try {
+      decision = await rateLimiter.consume(rateLimitKey(user?.id ?? null, request.ip));
+    } catch (error) {
+      // Fail open: a broken limiter store must not take the API down.
+      request.log.warn({ error }, "Rate limit store failed; allowing the request");
+      return;
+    }
+    if (decision.limited) {
+      reply.header("retry-after", decision.retryAfterSeconds);
+      return reply.status(429).send({ error: { code: "RATE_LIMITED", message: "Too many requests. Try again shortly." } });
+    }
+  });
 
   app.get("/health", async () => ({ status: "ok" }));
 
@@ -153,25 +204,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     return reply.status(200).send(verdict);
   });
 
-  app.addHook("onRequest", async (request, reply) => {
-    if (request.url === "/health") return;
-    const now = Date.now();
-    if (requestWindows.size > 10_000) {
-      for (const [key, value] of requestWindows) {
-        if (now - value.startedAt >= rateLimitWindowMs) requestWindows.delete(key);
-      }
-    }
-    const current = requestWindows.get(request.ip);
-    const window = !current || now - current.startedAt >= rateLimitWindowMs
-      ? { startedAt: now, count: 1 }
-      : { ...current, count: current.count + 1 };
-    requestWindows.set(request.ip, window);
-    if (window.count > rateLimitMax) {
-      reply.header("retry-after", Math.max(1, Math.ceil((window.startedAt + rateLimitWindowMs - now) / 1_000)));
-      return reply.status(429).send({ error: { code: "RATE_LIMITED", message: "Too many requests. Try again shortly." } });
-    }
-  });
-
   app.post("/v1/events", async (request, reply) => {
     const user = await authenticate(request);
 
@@ -192,6 +224,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
           code: "INVALID_REQUEST",
           message: "The event request is invalid.",
           details: parsed.error.flatten(),
+        },
+      });
+    }
+
+    if (
+      parsed.data.metadata !== undefined &&
+      Buffer.byteLength(JSON.stringify(parsed.data.metadata), "utf8") > MAX_EVENT_METADATA_BYTES
+    ) {
+      return invalidRequest(reply, "The event request is invalid.", {
+        formErrors: [],
+        fieldErrors: {
+          metadata: [`metadata must be at most ${MAX_EVENT_METADATA_BYTES} bytes as JSON.`],
         },
       });
     }
@@ -274,11 +318,25 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const user = await authenticate(request);
     if (!user) return unauthorized(reply);
     const params = IdParamsSchema.safeParse(request.params);
+    if (!params.success) return invalidRequest(reply, "The rule ID is invalid.", params.error.flatten());
     const body = UpdateRuleSchema.safeParse(request.body);
-    if (!params.success || !body.success) {
-      return invalidRequest(reply, "The rule update is invalid.");
+    if (!body.success) {
+      return invalidRequest(reply, "The rule update is invalid.", body.error.flatten());
     }
-    return reply.send(await settingsService.updateRule(user.id, params.data.id, body.data));
+    let update = body.data;
+    if (update.configuration !== undefined) {
+      // A rule's type can't change, so the new configuration must fit the stored type.
+      const rule = (await settingsService.listRules(user.id)).find((row) => row.id === params.data.id);
+      if (!rule) throw new SettingNotFoundError();
+      const checked = z
+        .object({ configuration: RuleConfigurationSchemas[rule.rule_type] })
+        .safeParse({ configuration: update.configuration });
+      if (!checked.success) {
+        return invalidRequest(reply, "The rule update is invalid.", checked.error.flatten());
+      }
+      update = { ...update, configuration: checked.data.configuration };
+    }
+    return reply.send(await settingsService.updateRule(user.id, params.data.id, update));
   });
 
   app.delete("/v1/rules/:id", async (request, reply) => {
@@ -310,9 +368,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const user = await authenticate(request);
     if (!user) return unauthorized(reply);
     const params = IdParamsSchema.safeParse(request.params);
+    if (!params.success) return invalidRequest(reply, "The budget ID is invalid.", params.error.flatten());
     const body = UpdateBudgetSchema.safeParse(request.body);
-    if (!params.success || !body.success) {
-      return invalidRequest(reply, "The budget update is invalid.");
+    if (!body.success) {
+      return invalidRequest(reply, "The budget update is invalid.", body.error.flatten());
     }
     return reply.send(await settingsService.updateBudget(user.id, params.data.id, body.data));
   });

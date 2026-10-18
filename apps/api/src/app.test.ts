@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DecideResponseSchema, StoreConfigSchema } from "@auxo/shared";
 
-import { buildApp } from "./application.js";
+import { buildApp, MAX_EVENT_METADATA_BYTES } from "./application.js";
 import type { AuthService } from "./auth/auth-service.js";
 import { InMemoryDecisionRepository } from "./repositories/decision-repository.js";
 import { InMemoryStoreConfigRepository } from "./repositories/store-config-repository.js";
@@ -300,6 +300,96 @@ describe("API safeguards", () => {
     expect(limited.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
     expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
   });
+
+  const tokenIsUserId: AuthService = { authenticate: async (token) => ({ id: token }) };
+  const rulesRequest = (token: string, remoteAddress = "203.0.113.1") => ({
+    method: "GET" as const,
+    url: "/v1/rules",
+    headers: { authorization: `Bearer ${token}` },
+    remoteAddress,
+  });
+
+  it("gives each authenticated user their own bucket behind a shared IP", async () => {
+    const app = await buildApp({ authRequired: true, authService: tokenIsUserId, rateLimitMax: 1 });
+    openApps.push(app);
+
+    expect((await app.inject(rulesRequest("user-a"))).statusCode).toBe(200);
+    expect((await app.inject(rulesRequest("user-b"))).statusCode).toBe(200);
+    expect((await app.inject(rulesRequest("user-a"))).statusCode).toBe(429);
+  });
+
+  it("limits an authenticated user across IPs", async () => {
+    const app = await buildApp({ authRequired: true, authService: tokenIsUserId, rateLimitMax: 1 });
+    openApps.push(app);
+
+    expect((await app.inject(rulesRequest("user-a", "203.0.113.1"))).statusCode).toBe(200);
+    expect((await app.inject(rulesRequest("user-a", "203.0.113.2"))).statusCode).toBe(429);
+  });
+
+  it("limits requests whose token fails authentication by IP", async () => {
+    const authService: AuthService = { authenticate: async () => null };
+    const app = await buildApp({ authRequired: true, authService, rateLimitMax: 1 });
+    openApps.push(app);
+
+    expect((await app.inject(rulesRequest("bad-1"))).statusCode).toBe(401);
+    expect((await app.inject(rulesRequest("bad-2"))).statusCode).toBe(429);
+    expect((await app.inject(rulesRequest("bad-3", "203.0.113.9"))).statusCode).toBe(401);
+  });
+
+  it("authenticates each request once for the limiter and the route", async () => {
+    let calls = 0;
+    const authService: AuthService = {
+      authenticate: async (token) => {
+        calls += 1;
+        return { id: token };
+      },
+    };
+    const app = await buildApp({ authRequired: true, authService });
+    openApps.push(app);
+
+    expect((await app.inject(rulesRequest("user-a"))).statusCode).toBe(200);
+    expect(calls).toBe(1);
+  });
+
+  it("uses X-Forwarded-For as the client IP when trustProxy is on", async () => {
+    const app = await buildApp({ trustProxy: true, rateLimitMax: 1 });
+    openApps.push(app);
+    const fromClient = (ip: string) => ({
+      method: "GET" as const,
+      url: "/v1/rules",
+      remoteAddress: "10.0.0.1",
+      headers: { "x-forwarded-for": ip },
+    });
+
+    expect((await app.inject(fromClient("198.51.100.1"))).statusCode).toBe(200);
+    expect((await app.inject(fromClient("198.51.100.2"))).statusCode).toBe(200);
+    expect((await app.inject(fromClient("198.51.100.1"))).statusCode).toBe(429);
+  });
+
+  it("ignores X-Forwarded-For when trustProxy is off", async () => {
+    const app = await buildApp({ rateLimitMax: 1 });
+    openApps.push(app);
+    const fromClient = (ip: string) => ({
+      method: "GET" as const,
+      url: "/v1/rules",
+      remoteAddress: "10.0.0.1",
+      headers: { "x-forwarded-for": ip },
+    });
+
+    expect((await app.inject(fromClient("198.51.100.1"))).statusCode).toBe(200);
+    expect((await app.inject(fromClient("198.51.100.2"))).statusCode).toBe(429);
+  });
+
+  it("fails open when the rate limit store errors", async () => {
+    const app = await buildApp({
+      rateLimitMax: 1,
+      rateLimitStore: { hit: async () => Promise.reject(new Error("store down")) },
+    });
+    openApps.push(app);
+
+    expect((await app.inject({ method: "GET", url: "/v1/rules" })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/rules" })).statusCode).toBe(200);
+  });
 });
 
 describe("POST /v1/events", () => {
@@ -377,6 +467,52 @@ describe("POST /v1/events", () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({ error: { code: "DECISION_NOT_FOUND" } });
+  });
+
+  it("accepts metadata up to the size cap and rejects anything larger", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const decisionId = (await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("2") } })).json()
+      .decision_id as string;
+    // {"note":"..."} is 11 bytes of JSON around the string.
+    const eventWithNote = (length: number) => ({
+      event_id: randomUUID(),
+      decision_id: decisionId,
+      action: "bought",
+      occurred_at: "2026-10-04T12:00:00.000Z",
+      metadata: { note: "x".repeat(length) },
+    });
+
+    const atCap = await app.inject({ method: "POST", url: "/v1/events", payload: eventWithNote(MAX_EVENT_METADATA_BYTES - 11) });
+    const overCap = await app.inject({ method: "POST", url: "/v1/events", payload: eventWithNote(MAX_EVENT_METADATA_BYTES - 10) });
+
+    expect(atCap.statusCode).toBe(201);
+    expect(overCap.statusCode).toBe(400);
+    expect(overCap.json()).toMatchObject({
+      error: { code: "INVALID_REQUEST", details: { fieldErrors: { metadata: [expect.any(String)] } } },
+    });
+  });
+
+  it("counts metadata size in UTF-8 bytes", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const decisionId = (await app.inject({ method: "POST", url: "/v1/decide", payload: { cart: cartWithHashSuffix("2") } })).json()
+      .decision_id as string;
+
+    // Each "é" is 2 bytes, so this is under the cap in characters but over it in bytes.
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      payload: {
+        event_id: randomUUID(),
+        decision_id: decisionId,
+        action: "bought",
+        occurred_at: "2026-10-04T12:00:00.000Z",
+        metadata: { note: "é".repeat(MAX_EVENT_METADATA_BYTES / 2) },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
   });
 
   it("rejects an invalid event", async () => {
@@ -505,6 +641,89 @@ describe("rule settings", () => {
     openApps.push(app);
     const response = await app.inject({ method: "PATCH", url: `/v1/rules/${randomUUID()}`, payload: {} });
     expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "INVALID_REQUEST", details: { formErrors: ["At least one field must be provided."] } },
+    });
+  });
+
+  it("explains which fields of a rule update are invalid", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const badBody = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${randomUUID()}`,
+      payload: { enabled: "no", rule_type: "merchant" },
+    });
+    expect(badBody.statusCode).toBe(400);
+    expect(badBody.json().error.details.fieldErrors).toHaveProperty("enabled");
+    expect(badBody.json().error.details.formErrors).toEqual([expect.stringContaining("rule_type")]);
+
+    const badId = await app.inject({ method: "PATCH", url: "/v1/rules/not-a-uuid", payload: { enabled: true } });
+    expect(badId.statusCode).toBe(400);
+    expect(badId.json().error.details.fieldErrors).toHaveProperty("id");
+  });
+
+  async function createMerchantRule(app: Awaited<ReturnType<typeof buildApp>>) {
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/rules",
+      payload: { name: "Rule", rule_type: "merchant", configuration: { lane: "L2", merchants: ["amazon.com"] }, enabled: true },
+    });
+    return created.json().id as string;
+  }
+
+  it("checks an updated configuration against the stored rule type", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const ruleId = await createMerchantRule(app);
+
+    // A valid cart_total configuration, but this rule is a merchant rule.
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${ruleId}`,
+      payload: { configuration: { lane: "L3", threshold_minor: 1_000 } },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "INVALID_REQUEST", details: { fieldErrors: { configuration: expect.any(Array) } } },
+    });
+    const stored = (await app.inject({ method: "GET", url: "/v1/rules" })).json().rules[0];
+    expect(stored.configuration).toEqual({ lane: "L2", merchants: ["amazon.com"] });
+  });
+
+  it("updates a configuration that fits the stored rule type", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const ruleId = await createMerchantRule(app);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${ruleId}`,
+      payload: { configuration: { lane: "L4", merchants: ["amazon.com", "target.com"] } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      id: ruleId,
+      rule_type: "merchant",
+      configuration: { lane: "L4", merchants: ["amazon.com", "target.com"] },
+    });
+  });
+
+  it("returns not found when updating the configuration of an unknown rule", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${randomUUID()}`,
+      payload: { configuration: { lane: "L4", merchants: ["amazon.com"] } },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: { code: "SETTING_NOT_FOUND" } });
   });
 });
 
@@ -546,6 +765,22 @@ describe("budget settings", () => {
       payload: { currency: "USD", limit_minor: 1000, period_start: "2026-11-01", period_end: "2026-10-01" },
     });
     expect(response.statusCode).toBe(400);
+  });
+
+  it("explains which fields of a budget update are invalid", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/v1/budgets/${randomUUID()}`,
+      payload: { limit_minor: -5 },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { code: "INVALID_REQUEST", details: { fieldErrors: { limit_minor: expect.any(Array) } } },
+    });
   });
 
   it("requires authentication for settings endpoints", async () => {

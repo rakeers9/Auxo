@@ -33,6 +33,16 @@ describe("loadConfig", () => {
     expect(config.decisionModelTimeoutMs).toBe(2_000);
   });
 
+  it("does not trust proxy headers unless TRUST_PROXY is true", () => {
+    expect(loadConfig({ NODE_ENV: "development" }).trustProxy).toBe(false);
+    expect(loadConfig({ NODE_ENV: "development", TRUST_PROXY: "false" }).trustProxy).toBe(false);
+    expect(loadConfig({ NODE_ENV: "development", TRUST_PROXY: "true" }).trustProxy).toBe(true);
+  });
+
+  it("rejects a TRUST_PROXY value other than true or false", () => {
+    expect(() => loadConfig({ NODE_ENV: "development", TRUST_PROXY: "yes" })).toThrow();
+  });
+
   it("rejects partial Cloudflare configuration", () => {
     expect(() =>
       loadConfig({ NODE_ENV: "development", CLOUDFLARE_ACCOUNT_ID: "account-id" }),
