@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-const ContextLaneSchema = z.enum(["L0", "L1", "L2", "L3", "L4"]);
+import { LaneSchema } from "./lane.js";
+import { RuleTypeSchema } from "./rules.js";
 
 export const DecisionReasonCodeSchema = z.enum([
   "rule.cart_total",
@@ -10,8 +11,26 @@ export const DecisionReasonCodeSchema = z.enum([
   "budget.critical",
   "budget.exceeded",
   "model.escalation",
+  "trigger.reducing",
+  "stub.hash",
   "no_policy_match",
 ]);
+
+export const DecisionHistorySchema = z
+  .object({
+    merchant: z.string(),
+    window_days: z.number().int().positive(),
+    // Confirmed purchases (`bought` events) at this merchant in the window.
+    purchases: z.number().int().nonnegative(),
+    // Their total, in the cart's currency only.
+    spent_minor: z.number().int().nonnegative().safe(),
+    check_ins: z.number().int().nonnegative(),
+    // Share of check-ins answered "regret"; null with no check-ins.
+    regret_rate: z.number().min(0).max(1).nullable(),
+    // Share of paused or blocked decisions the user overrode; null with none.
+    override_rate: z.number().min(0).max(1).nullable(),
+  })
+  .strict();
 
 export const DecisionContextSchema = z
   .object({
@@ -31,23 +50,26 @@ export const DecisionContextSchema = z
     matched_rules: z.array(z.object({
       rule_id: z.string().uuid(),
       name: z.string(),
-      rule_type: z.string(),
-      lane: ContextLaneSchema,
+      rule_type: RuleTypeSchema,
+      lane: LaneSchema,
     }).strict()),
     model_signal: z.object({
       provider: z.literal("cloudflare-clef"),
       model: z.string(),
-      suggested_lane: ContextLaneSchema,
+      suggested_lane: LaneSchema,
       confidence: z.number().min(0).max(1),
     }).strict().nullable(),
     decisive_factors: z.array(z.object({
       code: DecisionReasonCodeSchema,
       source: z.enum(["rule", "budget", "model", "policy"]),
-      lane: ContextLaneSchema,
+      lane: LaneSchema,
     }).strict()).min(1),
     available_actions: z.array(z.enum(["continue", "leave", "save_for_later", "override_after_cooldown"])),
+    // The user's recent history at this merchant (Phase 4 feedback loop).
+    history: DecisionHistorySchema.optional(),
   })
   .strict();
 
 export type DecisionReasonCode = z.infer<typeof DecisionReasonCodeSchema>;
+export type DecisionHistory = z.infer<typeof DecisionHistorySchema>;
 export type DecisionContext = z.infer<typeof DecisionContextSchema>;

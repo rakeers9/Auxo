@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { CartHashSchema } from "./cart-hash.js";
+
 export const PassSchema = z
   .object({
     pass_id: z.string().uuid(),
@@ -15,7 +17,7 @@ export const CreatePassRequestSchema = z
   .strict();
 
 export const ActivePassQuerySchema = z.object({
-  cart_hash: z.string().regex(/^(?:sha256:)?[a-f0-9]{64}$/i),
+  cart_hash: CartHashSchema,
 }).strict();
 
 export const ActivePassResponseSchema = z.object({ pass: PassSchema.nullable() }).strict();

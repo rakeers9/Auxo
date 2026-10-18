@@ -1,9 +1,7 @@
 import { z } from "zod";
 
 import { DecisionContextSchema } from "./decision-context.js";
-
-// L0 is a silent pass. It is still returned and logged so friction rate can be measured.
-export const LaneSchema = z.enum(["L0", "L1", "L2", "L3", "L4"]);
+import { LaneSchema } from "./lane.js";
 export const VerdictActionSchema = z.enum(["allow", "pause", "block"]);
 
 export const VerdictSchema = z
@@ -17,6 +15,5 @@ export const VerdictSchema = z
   })
   .strict();
 
-export type Lane = z.infer<typeof LaneSchema>;
 export type VerdictAction = z.infer<typeof VerdictActionSchema>;
 export type Verdict = z.infer<typeof VerdictSchema>;

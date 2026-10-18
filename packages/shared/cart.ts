@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { CartHashSchema } from "./cart-hash.js";
+
 export const CartItemSchema = z
   .object({
     name: z.string().trim().min(1).max(500),
@@ -15,10 +17,7 @@ export const CartSchema = z
     total_minor: z.number().int().nonnegative().safe(),
     currency: z.string().trim().regex(/^[A-Z]{3}$/),
     url: z.string().url(),
-    cart_hash: z
-      .string()
-      .regex(/^(?:sha256:)?[a-f0-9]{64}$/i)
-      .transform((value) => value.toLowerCase()),
+    cart_hash: CartHashSchema,
   })
   .strict();
 

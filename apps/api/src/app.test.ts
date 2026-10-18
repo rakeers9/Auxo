@@ -457,7 +457,7 @@ describe("rule settings", () => {
       payload: {
         name: "Pause large purchases",
         rule_type: "cart_total",
-        configuration: { threshold_minor: 10000 },
+        configuration: { lane: "L2", threshold_minor: 10000 },
         enabled: true,
       },
     });
@@ -487,7 +487,7 @@ describe("rule settings", () => {
       method: "POST",
       url: "/v1/rules",
       headers: { authorization: "Bearer user-a" },
-      payload: { name: "Rule", rule_type: "merchant", configuration: {}, enabled: true },
+      payload: { name: "Rule", rule_type: "merchant", configuration: { lane: "L2", merchants: ["amazon.com"] }, enabled: true },
     });
 
     const response = await app.inject({
