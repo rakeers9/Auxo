@@ -2,7 +2,7 @@ import type { Verdict } from "@auxo/shared";
 import { describe, expect, it } from "vitest";
 
 import type { ClickSignal } from "../messages";
-import { createClickGate } from "./gate";
+import { createClickGate, enforcementEnabled, forceBlockEnabled } from "./gate";
 
 const verdict = (lane: Verdict["lane"], action: Verdict["action"], id = "11111111-1111-4111-8111-111111111111"): Verdict => ({
   decision_id: id,
@@ -85,5 +85,30 @@ describe("createClickGate (dev: always on)", () => {
   it("still never gates guesses", () => {
     const g = createClickGate({ alwaysOn: true, devVerdict });
     expect(g.check({ intent: "buy_now", source: "guess" })).toEqual({ block: false });
+  });
+});
+
+describe("forceBlockEnabled", () => {
+  it("is on only in dev builds with WXT_FORCE_BLOCK=1", () => {
+    expect(forceBlockEnabled("development", "1")).toBe(true);
+    expect(forceBlockEnabled("development", undefined)).toBe(false);
+    expect(forceBlockEnabled("development", "0")).toBe(false);
+    expect(forceBlockEnabled("production", "1")).toBe(false);
+  });
+});
+
+describe("enforcement flag", () => {
+  it("is on only with WXT_ENFORCE=1", () => {
+    expect(enforcementEnabled("1")).toBe(true);
+    expect(enforcementEnabled(undefined)).toBe(false);
+    expect(enforcementEnabled("0")).toBe(false);
+  });
+
+  it("never blocks when disabled, even with a block answer or always-on", () => {
+    for (const alwaysOn of [false, true]) {
+      const g = createClickGate({ enabled: false, alwaysOn, devVerdict });
+      g.setVerdict(verdict("L4", "block"));
+      expect(g.check(known("add_to_cart"))).toEqual({ block: false });
+    }
   });
 });

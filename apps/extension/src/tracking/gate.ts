@@ -5,6 +5,18 @@ import type { ClickSignal } from "../messages";
 // Buy clicks Auxo may stop. Going to the cart isn't a purchase step.
 const GATED = new Set<ClickSignal["intent"]>(["add_to_cart", "buy_now", "checkout", "place_order"]);
 
+// Dev builds follow the backend's answer like prod. Set WXT_FORCE_BLOCK=1 at
+// build time to block every gated known click instead (the click-again flow).
+export function forceBlockEnabled(mode: string, flag: string | undefined): boolean {
+  return mode === "development" && flag === "1";
+}
+
+// Pauses, blocks and the overlay are off until WXT_ENFORCE=1 is set at build
+// time, so the extension only reads and reports while the data is checked.
+export function enforcementEnabled(flag: string | undefined): boolean {
+  return flag === "1";
+}
+
 export type GateResult = { block: false } | { block: true; verdict: Verdict; synthetic: boolean };
 
 export interface ClickGate {
@@ -18,6 +30,8 @@ export interface ClickGate {
 }
 
 export interface ClickGateOptions {
+  // Feature flag: false never blocks a click. Defaults to true.
+  enabled?: boolean;
   // Dev builds: block every gated known click, even without a block answer.
   alwaysOn: boolean;
   // Used when alwaysOn and the page has no answer yet. Never sent anywhere.
@@ -29,6 +43,7 @@ export interface ClickGateOptions {
 // known store buttons are gated (never guesses), and only when the page's
 // answer is "block" (or always, in dev builds).
 export function createClickGate(options: ClickGateOptions): ClickGate {
+  const enabled = options.enabled ?? true;
   let current: Verdict | null = null;
   const overridden = new Map<string, number>();
 
@@ -40,7 +55,7 @@ export function createClickGate(options: ClickGateOptions): ClickGate {
       overridden.set(decisionId, expiresAt);
     },
     check(signal) {
-      if (signal.source !== "known" || !GATED.has(signal.intent)) return { block: false };
+      if (!enabled || signal.source !== "known" || !GATED.has(signal.intent)) return { block: false };
 
       const verdict = current ?? (options.alwaysOn ? options.devVerdict : null);
       if (!verdict || (overridden.get(verdict.decision_id) ?? 0) > Date.now()) return { block: false };

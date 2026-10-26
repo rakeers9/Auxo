@@ -6,6 +6,7 @@ import {
 
 import { isCheckoutCandidate, isLikelyShopify, scoreCheckout } from "../src/cart";
 import { createGenericCheckout, GENERIC_PAUSE_VERDICT, type GenericCheckoutReport } from "../src/content/generic";
+import { ENFORCE } from "../src/flags";
 import { createDebugPanel, type DebugPanel } from "../src/debug/panel";
 import { renderOverlay, type OverlayHandle } from "../src/overlay";
 import { watchForChanges } from "../src/watch";
@@ -35,6 +36,7 @@ export default defineContentScript({
       gate: isCheckoutCandidate,
       score: scoreCheckout,
       showPause: () => {
+        if (!ENFORCE) return; // popups are off
         void createShadowRootUi(ctx, {
           name: "auxo-overlay",
           position: "inline",

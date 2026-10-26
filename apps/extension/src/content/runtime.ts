@@ -33,7 +33,8 @@ import type {
   WishlistSaveMessage,
 } from "../messages";
 import { renderClickAgainHint, renderOverlay, type OverlayHandle } from "../overlay";
-import { createClickGate } from "../tracking/gate";
+import { ENFORCE } from "../flags";
+import { createClickGate, forceBlockEnabled } from "../tracking/gate";
 import { listenForBuyIntents } from "../tracking/listener";
 import { createMiniCartHandler } from "../tracking/minicart-handler";
 import type { MiniCartDiff } from "../tracking/sidesheet";
@@ -41,9 +42,10 @@ import { createPendingStore } from "../tracking/pending";
 import { createTracker } from "../tracking/tracker";
 
 // Dev builds (`wxt` or `wxt build --mode development`) show the always-on
-// debug panel instead of the overlay, to check what the extension reads, and
-// block every known buy click so the click-again flow can be tried.
+// debug panel instead of the overlay, to check what the extension reads.
+// Clicks follow the backend's answer unless WXT_FORCE_BLOCK=1 is set.
 export const DEBUG = import.meta.env.MODE === "development";
+const FORCE_BLOCK = forceBlockEnabled(import.meta.env.MODE, import.meta.env.WXT_FORCE_BLOCK);
 
 // Dev only: the answer used to block a click when the page has none yet.
 // Never sent to the backend.
@@ -108,8 +110,8 @@ function sessionStorageOrNull(): Storage | null {
 export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapter): Promise<void> {
   let ui: ShadowRootContentScriptUi<OverlayHandle | null> | null = null;
   let hintUi: ShadowRootContentScriptUi<OverlayHandle> | null = null;
-  // Stops known buy clicks when this page's answer is "block" (always in dev).
-  const gate = createClickGate({ alwaysOn: DEBUG, devVerdict: DEV_VERDICT });
+  // Stops known buy clicks when this page's answer is "block" (always with WXT_FORCE_BLOCK=1 in dev).
+  const gate = createClickGate({ enabled: ENFORCE, alwaysOn: FORCE_BLOCK, devVerdict: DEV_VERDICT });
   let debugUi: ShadowRootContentScriptUi<DebugPanel> | null = null;
 
   // What the debug panel shows, kept between checks.
@@ -219,6 +221,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   // A known buy click was stopped. Show the pause for it; after Continue,
   // the user clicks the real button again themselves (never replayed).
   const showBlocked = async (verdict: Verdict, label: string, synthetic: boolean) => {
+    if (!ENFORCE) return;
     removeOverlay();
     removeHint();
     const next = await createShadowRootUi(ctx, {
@@ -256,6 +259,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   };
 
   const showHint = async (label: string) => {
+    if (!ENFORCE) return;
     removeHint();
     const next = await createShadowRootUi(ctx, {
       name: "auxo-hint",
@@ -271,6 +275,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   const show = async (verdict: Verdict, trigger?: Trigger) => {
     removeOverlay();
+    if (!ENFORCE) return; // enforcement is off
     if (DEBUG) return; // the debug panel shows the verdict instead
     if (verdict.lane === "L0") return; // silent pass
     // Putting things back is recorded, never paused. A repeat of the same
