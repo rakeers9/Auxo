@@ -324,8 +324,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   }
 
   const record = (outcome: CartFlowOutcome) => {
-    // A product page re-render after an add-to-cart answer shouldn't wipe it.
-    if (outcome.status === "skipped" && outcome.reason === "product_without_click") return;
+    // A product page is never asked about; its re-renders shouldn't wipe the
+    // answer a cart view gave.
+    if (outcome.status === "skipped" && outcome.reason === "product_page") return;
     switch (outcome.status) {
       case "skipped":
       case "unreadable":
@@ -333,14 +334,12 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
         cartHash = null;
         break;
       case "failed_open":
-        if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
         console.info("[Auxo] failed open:", outcome.reason);
         backend = { status: "failed", reason: outcome.reason };
         cartHash = outcome.cartHash;
         trigger = outcome.trigger;
         break;
       case "shown":
-        if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
         gate.setVerdict(outcome.verdict);
         backend = {
           status: "verdict",
@@ -367,6 +366,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   const flow = createCartFlow({
     inspect: () => inspect(),
+    wholeCart: () => adapter.fullCart?.(overrides) ?? null,
     hash: hashCart,
     requestVerdict,
     show: (verdict, t) => void show(verdict, t),
@@ -374,7 +374,12 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   // The cart sidebar on product pages: removals are linked to the decision
   // about the item; + adds get a fresh decision.
+  const pending = createPendingStore(sessionStorageOrNull());
   const miniCart = createMiniCartHandler({
+    // The sidebar answered this add, so the page it might have led to must not ask again.
+    onAddAsked: (intent) => {
+      if (intent === "add_to_cart") pending.dropClick("add_to_cart");
+    },
     decisionFor: async (items) => {
       const message: DecisionForMessage = {
         type: "auxo:decision-for",
@@ -469,7 +474,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   const tracker = createTracker({
     flow,
-    pending: createPendingStore(sessionStorageOrNull()),
+    pending,
     inspect: () => inspect(),
     // Cart and checkout page edits are handled like sidebar edits.
     onCartDiff: (before, after, diff) => reportCartChange(before, after, diff, { source: "cart_page" }),

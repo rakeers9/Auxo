@@ -39,7 +39,8 @@ export interface Tracker {
 const FULL_CART_PAGES = new Set<PageType>(["cart", "checkout"]);
 
 // Clicks decide WHEN to ask; the page readers decide WHAT to send. Rules:
-// - Add to cart on a product page: read the product now, before the page moves on.
+// - Add to cart: remembered, not asked. The cart view it leads to (added-to-cart
+//   page) asks about the whole cart; an in-place add is asked by the sidebar.
 // - Buy now / go to cart / checkout: remember the click until the next page
 //   reads it. If that page isn't readable yet (still loading), the click
 //   waits for the first successful read. No timers.
@@ -127,8 +128,11 @@ export function createTracker(deps: TrackerDeps): Tracker {
         return null;
       }
 
+      // Add to cart is never asked about at the click (the product page is
+      // not read for a decision). It's remembered for the cart view it leads
+      // to (the added-to-cart page); when the page stays instead, the cart
+      // sidebar sees the new line, asks, and drops this (dropClick).
       const inspected = await syncInspection;
-      if (inspected.pageType === "product") return run({ ...click, pageType: inspected.pageType });
       deps.pending.saveClick({ ...click, pageType: inspected.pageType });
       return null;
     },

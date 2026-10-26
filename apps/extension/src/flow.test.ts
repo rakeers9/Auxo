@@ -90,25 +90,58 @@ describe("createCartFlow", () => {
     expect(d.requestVerdict).not.toHaveBeenCalled();
   });
 
-  it("doesn't ask again on the added-to-cart page (the click was already decided)", async () => {
-    const d = deps({ inspect: () => page("added_to_cart") });
+  describe("the added-to-cart page", () => {
+    const added: CartDraft = { ...draft, url: "https://www.amazon.com/cart/smart-wagon" };
+    const wholeCart: CartDraft = {
+      ...draft,
+      items: [{ name: "Desk lamp", price_minor: 2499, qty: 1 }, { name: "Mug", price_minor: 999, qty: 2 }],
+      total_minor: 4497,
+    };
 
-    expect(await createCartFlow(d.deps).check(click("view_cart"))).toEqual({
-      status: "skipped",
-      pageType: "added_to_cart",
-      reason: "added_to_cart_page",
+    it("asks about the whole cart for the add-to-cart click that led there", async () => {
+      const d = deps({ inspect: () => page("added_to_cart", added), wholeCart: () => wholeCart });
+
+      const outcome = await createCartFlow(d.deps).check(click("add_to_cart"));
+
+      expect(outcome).toMatchObject({ status: "shown", pageType: "cart", draft: wholeCart });
+      expect(d.requestVerdict).toHaveBeenCalledTimes(1);
+      expect(d.requestVerdict.mock.calls[0]?.[0]).toMatchObject({ items: wholeCart.items, total_minor: 4497 });
+      // The backend sees a cart view, with the click that caused it.
+      expect(d.requestVerdict.mock.calls[0]?.[1]).toMatchObject({ intent: "add_to_cart", source: "known", page_type: "cart" });
     });
-    expect(d.requestVerdict).not.toHaveBeenCalled();
+
+    it("falls back to what was added when the whole cart can't be read", async () => {
+      for (const wholeCartDep of [() => null, () => Promise.reject(new Error("boom")), () => ({ ...draft, items: [] })]) {
+        const d = deps({ inspect: () => page("added_to_cart", added), wholeCart: wholeCartDep });
+        expect(await createCartFlow(d.deps).check(click("add_to_cart"))).toMatchObject({ status: "shown", draft: added });
+      }
+    });
+
+    it("doesn't ask without an add-to-cart click (reload, or coming Back)", async () => {
+      const d = deps({ inspect: () => page("added_to_cart", added), wholeCart: () => wholeCart });
+      const skipped = { status: "skipped", pageType: "added_to_cart", reason: "added_to_cart_page" };
+
+      expect(await createCartFlow(d.deps).check()).toEqual(skipped);
+      expect(await createCartFlow(d.deps).check(click("view_cart"))).toEqual(skipped);
+      expect(d.requestVerdict).not.toHaveBeenCalled();
+    });
+
+    it("keeps the click for a retry when the page isn't readable yet", async () => {
+      const d = deps({ inspect: () => page("added_to_cart", null) });
+
+      expect(await createCartFlow(d.deps).check(click("add_to_cart"))).toMatchObject({ status: "unreadable", pageType: "added_to_cart" });
+      expect(d.requestVerdict).not.toHaveBeenCalled();
+    });
   });
 
-  it("only asks on a product page after an add-to-cart click", async () => {
+  it("never asks about a product page, with or without a click (the cart is the source of truth)", async () => {
     const d = deps({ inspect: () => page("product") });
     const flow = createCartFlow(d.deps);
 
-    expect(await flow.check()).toMatchObject({ status: "skipped", reason: "product_without_click" });
-    expect(await flow.check(click("buy_now"))).toMatchObject({ status: "skipped", reason: "product_without_click" });
-    expect(await flow.check(click("add_to_cart"))).toMatchObject({ status: "shown", pageType: "product" });
-    expect(d.requestVerdict).toHaveBeenCalledTimes(1);
+    for (const check of [flow.check(), flow.check(click("buy_now")), flow.check(click("add_to_cart"))]) {
+      expect(await check).toMatchObject({ status: "skipped", pageType: "product", reason: "product_page" });
+    }
+    expect(d.requestVerdict).not.toHaveBeenCalled();
   });
 
   it("reports why an unreadable page wasn't asked about", async () => {

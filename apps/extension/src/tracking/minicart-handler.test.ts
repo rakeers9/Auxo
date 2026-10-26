@@ -106,10 +106,34 @@ describe("createMiniCartHandler: additions", () => {
     const t = setup("product");
     await t.handler.onChange(cart([mug]), cart([{ ...mug, qty: 4 }]), { removed: [], added: [{ ...mug, qty: 1 }] });
 
-    expect(t.decide).toHaveBeenCalledWith(
-      { merchant: "amazon.com", items: [{ name: "Mug", price_minor: 999, qty: 1 }], total_minor: 999, currency: "USD", url: cart([]).url },
-      { intent: "add_to_cart", source: "page", page_type: "product", occurred_at: NOW.toISOString() },
-    );
+    // The whole cart the new line joined, not just the new line.
+    expect(t.decide).toHaveBeenCalledWith(cart([{ ...mug, qty: 4 }]), {
+      intent: "add_to_cart",
+      source: "page",
+      page_type: "product",
+      occurred_at: NOW.toISOString(),
+    });
+  });
+
+  it("tells the caller an add was asked about, with its intent (so a remembered click is dropped)", async () => {
+    const onAddAsked = vi.fn();
+    const handler = createMiniCartHandler({
+      decisionFor: async () => null,
+      sendEvent: () => {},
+      decide: async () => "own-1",
+      pageType: () => "product",
+      onAddAsked,
+      now: () => NOW,
+    });
+    handler.noteEditClick({ intent: "add_to_cart", source: "known", label: "Add to cart" });
+
+    await handler.onChange(cart([mug]), cart([mug, lamp]), { removed: [], added: [lamp] });
+    expect(onAddAsked).toHaveBeenCalledWith("add_to_cart");
+
+    // A removal alone asks nothing about adds.
+    onAddAsked.mockClear();
+    await handler.onChange(cart([mug, lamp]), cart([mug]), { removed: [lamp], added: [] });
+    expect(onAddAsked).not.toHaveBeenCalled();
   });
 
   it("credits a + click as increase_qty", async () => {
@@ -149,7 +173,9 @@ describe("createMiniCartHandler: additions", () => {
     t.handler.noteClickedAdd(cart([{ ...mug, qty: 1 }]));
 
     await t.handler.onChange(cart([]), cart([mug]), { removed: [], added: [mug] });
-    expect(t.decide.mock.calls[0]?.[0].items).toEqual([{ name: "Mug", price_minor: 999, qty: 2 }]);
+    // Still asked (2 of the 3 weren't from the click), as the whole cart.
+    expect(t.decide.mock.calls[0]?.[0]).toEqual(cart([mug]));
+    expect(t.reports[0]?.askedAbout).toEqual([{ name: "Mug", price_minor: 999, qty: 2 }]);
   });
 
   it("maps pages without a trigger page type to 'other'", async () => {

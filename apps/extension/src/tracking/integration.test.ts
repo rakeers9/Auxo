@@ -4,10 +4,10 @@ import { resolve } from "node:path";
 import { CartSchema, DecideRequestSchema, type Cart, type DecisionEvent, type Trigger, type Verdict } from "@auxo/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { hashCart, inspectAmazonPage } from "../cart";
+import { hashCart, inspectAmazonPage, readAmazonMiniCart } from "../cart";
 import { classifyClick, classifySubmit } from "../clicks";
 import { createCartFlow } from "../flow";
-import type { DecideResult } from "../messages";
+import type { CartDraft, DecideResult } from "../messages";
 import { listenForBuyIntents } from "./listener";
 import { createMiniCartHandler } from "./minicart-handler";
 import { createPendingStore } from "./pending";
@@ -18,6 +18,7 @@ const FIXTURES = resolve(__dirname, "../cart/__fixtures__");
 const PRODUCT_URL = "https://www.amazon.com/Side-Table/dp/B0TEST0001?ref=x";
 const CART_URL = "https://www.amazon.com/gp/cart/view.html";
 const CHECKOUT_URL = "https://www.amazon.com/checkout/p/p-X/spc?isBuyNow=1";
+const ADDED_URL = "https://www.amazon.com/cart/smart-wagon?newItems=00000000-0000-4000-8000-000000000005,1&ref_=sw_refresh";
 
 const verdict: Verdict = {
   decision_id: "2b9ebefe-78c8-561e-9a68-da51842c65a8",
@@ -35,6 +36,7 @@ function openPage(fixture: string, href: string) {
   const events: DecisionEvent[] = [];
   const flow = createCartFlow({
     inspect: () => inspectAmazonPage(document, url()),
+    wholeCart: () => readAmazonMiniCart(document, url()).draft,
     hash: hashCart,
     requestVerdict: vi.fn(async (cart: Cart, trigger: Trigger): Promise<DecideResult> => {
       requests.push({ cart, trigger });
@@ -77,23 +79,55 @@ function openPage(fixture: string, href: string) {
 beforeEach(() => sessionStorage.clear());
 
 describe("click tracking on real Amazon pages", () => {
-  it("add to cart: reads the product at the click and sends it with the trigger", async () => {
-    const page = openPage("amazon-product.html", PRODUCT_URL);
-    await page.tracker.onLoad();
-    expect(page.requests).toHaveLength(0); // a product page alone isn't a buy moment
+  it("add to cart: nothing is asked on the product page; the added-to-cart page asks about the whole cart", async () => {
+    const product = openPage("amazon-product.html", PRODUCT_URL);
+    await product.tracker.onLoad();
+    expect(product.requests).toHaveLength(0); // a product page alone isn't a buy moment
 
-    await page.click("#add-to-cart-button");
+    await product.click("#add-to-cart-button");
+    expect(product.requests).toHaveLength(0); // the product page is never asked about
+    product.stop();
 
-    expect(page.requests).toHaveLength(1);
-    const { cart, trigger } = page.requests[0]!;
+    const added = openPage("amazon-added-to-cart.html", ADDED_URL);
+    await added.tracker.onLoad();
+
+    expect(added.requests).toHaveLength(1);
+    const { cart, trigger } = added.requests[0]!;
     expect(CartSchema.safeParse(cart).success).toBe(true);
-    expect(cart.items).toHaveLength(1);
-    // The selected variant's ASIN from the buy box, with no slug or query string.
-    const asin = document.querySelector<HTMLInputElement>("form#addToCart input#ASIN")!.value;
-    expect(cart.url).toBe(`https://www.amazon.com/dp/${asin}`);
-    expect(trigger).toMatchObject({ intent: "add_to_cart", source: "known", page_type: "product" });
+    // The whole cart (the mini cart's lines, which add up to the cart subtotal), not just the added item.
+    const whole = readAmazonMiniCart(document, new URL(ADDED_URL)).draft!;
+    expect(cart.items).toEqual(whole.items);
+    expect(cart.total_minor).toBe(whole.total_minor);
+    expect(trigger).toMatchObject({ intent: "add_to_cart", source: "known", page_type: "cart" });
     expect(DecideRequestSchema.safeParse({ cart, trigger }).success).toBe(true);
-    page.stop();
+    added.stop();
+  });
+
+  it("add to cart: reloading or coming back to the added-to-cart page asks nothing more", async () => {
+    const product = openPage("amazon-product.html", PRODUCT_URL);
+    await product.click("#add-to-cart-button");
+    product.stop();
+    const added = openPage("amazon-added-to-cart.html", ADDED_URL);
+    await added.tracker.onLoad();
+    added.stop();
+    expect(added.requests).toHaveLength(1);
+
+    const again = openPage("amazon-added-to-cart.html", ADDED_URL);
+    await again.tracker.onLoad();
+    expect(again.requests).toHaveLength(0);
+    again.stop();
+  });
+
+  it("add to cart: a click the sidebar already answered isn't asked again on the next page", async () => {
+    const product = openPage("amazon-product.html", PRODUCT_URL);
+    await product.click("#add-to-cart-button");
+    createPendingStore(sessionStorage).dropClick("add_to_cart"); // what the sidebar handler does
+    product.stop();
+
+    const added = openPage("amazon-added-to-cart.html", ADDED_URL);
+    await added.tracker.onLoad();
+    expect(added.requests).toHaveLength(0);
+    added.stop();
   });
 
   it("buy now: remembered across the page change and sent with the checkout cart", async () => {
@@ -275,7 +309,12 @@ describe("cart sidebar on a real product page", () => {
 
     expect(s.decided).toHaveLength(1);
     expect(s.decided[0]!.trigger).toMatchObject({ intent: "add_to_cart", source: "page", page_type: "product" });
-    expect(s.decided[0]!.cart).toMatchObject({ items: [{ name: "Ceramic coffee mug, 12 oz, matte black", price_minor: 999, qty: 1 }], total_minor: 999 });
+    // The whole cart after the add (its subtotal), with the mug at its new quantity.
+    const whole = s.decided[0]!.cart as CartDraft;
+    expect(whole.total_minor).toBe(7995);
+    expect(whole.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "Ceramic coffee mug, 12 oz, matte black", price_minor: 999, qty: 4 })]),
+    );
     s.stop();
     vi.useRealTimers();
   });
@@ -435,7 +474,8 @@ describe("real sidebar saves: before and after each action", () => {
 
     expect(w.decided).toHaveLength(1);
     expect(w.decided[0]!.trigger).toMatchObject({ intent: "increase_qty", source: "known" });
-    expect(w.decided[0]!.cart.items).toEqual([expect.objectContaining({ price_minor: 1199, qty: 1 })]);
+    // The whole cart after the +, with that line at its new quantity.
+    expect(w.decided[0]!.cart.items).toEqual(expect.arrayContaining([expect.objectContaining({ price_minor: 1199, qty: 2 })]));
     w.stop();
     vi.useRealTimers();
   });

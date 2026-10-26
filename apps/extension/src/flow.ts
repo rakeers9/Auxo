@@ -11,6 +11,10 @@ export interface CartFlowDeps {
   // Sync for DOM readers (Amazon); async for stores read over the network
   // (Shopify's /cart.js).
   inspect(): PageInspection | Promise<PageInspection>;
+  // The whole cart as the page shows it (the cart sidebar on an added-to-cart
+  // page), if the store can tell. The added-to-cart reading only holds what
+  // was just added; a decision about an add is about the cart it joined.
+  wholeCart?(): CartDraft | null | Promise<CartDraft | null>;
   hash(draft: CartDraft): Promise<string>;
   requestVerdict(cart: Cart, trigger: Trigger): Promise<DecideResult>;
   show(verdict: Verdict, trigger: Trigger): void;
@@ -19,7 +23,7 @@ export interface CartFlowDeps {
 }
 
 export type CartFlowOutcome =
-  | { status: "skipped"; pageType: PageType; reason: "not_shopping_page" | "product_without_click" | "added_to_cart_page" }
+  | { status: "skipped"; pageType: PageType; reason: "not_shopping_page" | "product_page" | "added_to_cart_page" }
   | { status: "unreadable"; pageType: PageType; problems: string[] }
   | {
       status: "failed_open";
@@ -46,9 +50,12 @@ export interface CartFlow {
 }
 
 // Every cart, checkout, or add-to-cart moment goes to the backend with what
-// prompted it. Product pages only count after an add-to-cart click (Buy Now is
-// decided on the checkout page it leads to). Every re-check is sent, even an
-// identical cart (tagged same_cart). Any failure lets the user through.
+// prompted it. The cart is the source of truth: a product page is never asked
+// about (its layouts are endless), so an add to cart is decided on the cart
+// view it leads to (the added-to-cart page, where the whole cart is read), or
+// by the cart sidebar when the page stays. Buy Now is decided on the checkout
+// page it leads to. Every re-check is sent, even an identical cart (tagged
+// same_cart). Any failure lets the user through.
 export function createCartFlow(deps: CartFlowDeps): CartFlow {
   const now = deps.now ?? (() => new Date());
   let lastHash: string | null = null;
@@ -61,18 +68,28 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
       const pageType = inspection.pageType;
 
       if (pageType === "other") return { status: "skipped", pageType, reason: "not_shopping_page" };
-      // The add to cart that led here was already decided at the click; its
-      // answer is handed over by the worker, not asked again.
-      if (pageType === "added_to_cart") return { status: "skipped", pageType, reason: "added_to_cart_page" };
-      if (pageType === "product" && click?.signal.intent !== "add_to_cart") {
-        return { status: "skipped", pageType, reason: "product_without_click" };
+      if (pageType === "product") return { status: "skipped", pageType, reason: "product_page" };
+      // The added-to-cart page is asked about only for the add-to-cart click
+      // that led here; reloading it or coming Back to it asks nothing.
+      if (pageType === "added_to_cart" && click?.signal.intent !== "add_to_cart") {
+        return { status: "skipped", pageType, reason: "added_to_cart_page" };
       }
 
-      const draft = inspection.draft;
+      let draft = inspection.draft;
       if (!draft) return { status: "unreadable", pageType, problems: inspection.problems };
       // A verifiably empty cart (e.g. after deleting the last item) has
       // nothing to decide about; removals are reported by the tracker.
       if (draft.items.length === 0) return { status: "unreadable", pageType, problems: ["the cart is empty"] };
+      // The added-to-cart reading is only what was added (and is verified
+      // against the cart subtotal). Ask about the whole cart it joined.
+      if (pageType === "added_to_cart") {
+        const whole = await Promise.resolve()
+          .then(() => deps.wholeCart?.())
+          .catch(() => null);
+        if (whole && whole.items.length > 0) draft = whole;
+      }
+      // The added-to-cart page shows the cart, so the backend sees a cart page.
+      const triggerPage: TriggerPageType = pageType === "added_to_cart" ? "cart" : pageType;
 
       const cartHash = await deps.hash(draft);
       // The same cart again (e.g. the cart area re-rendered) is still sent:
@@ -84,14 +101,14 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
         ? {
             intent: click.signal.intent,
             source: click.signal.source,
-            page_type: pageType,
+            page_type: triggerPage,
             occurred_at: click.at,
             ...(click.signal.label ? { label: click.signal.label } : {}),
           }
         : {
             intent: "page_view",
             source: "page",
-            page_type: pageType,
+            page_type: triggerPage,
             occurred_at: now().toISOString(),
             ...(sameCart ? { same_cart: true } : {}),
           };
@@ -100,11 +117,11 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
         deps.requestVerdict({ ...draft, cart_hash: cartHash }, trigger),
         deps.timeoutMs ?? CONTENT_TIMEOUT_MS,
       );
-      if (!result.ok) return { status: "failed_open", pageType, draft, cartHash, trigger, reason: result.reason };
+      if (!result.ok) return { status: "failed_open", pageType: triggerPage, draft, cartHash, trigger, reason: result.reason };
 
-      last = { decisionId: result.verdict.decision_id, draft, cartHash, pageType };
+      last = { decisionId: result.verdict.decision_id, draft, cartHash, pageType: triggerPage };
       deps.show(result.verdict, trigger);
-      return { status: "shown", pageType, draft, cartHash, trigger, verdict: result.verdict };
+      return { status: "shown", pageType: triggerPage, draft, cartHash, trigger, verdict: result.verdict };
     },
   };
 }
