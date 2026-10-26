@@ -169,6 +169,95 @@ describe("accordion buy box (price beside the form, not inside it)", () => {
     ]);
   });
 
+  // What Amazon does when the shopper picks the "Used" row: the active class
+  // moves, the New panels are hidden (not removed), and the Used ones shown.
+  function selectUsedOffer(doc: Document): void {
+    doc.getElementById("newAccordionRow_0")!.classList.remove("a-accordion-active");
+    doc.getElementById("usedAccordionRow")!.classList.add("a-accordion-active");
+    const show = (id: string, on: boolean) => { doc.getElementById(id)!.style.display = on ? "block" : "none"; };
+    show("a-accordion-auto-0", false);
+    show("a-accordion-auto-7", true);
+    show("apex_desktop_newAccordionRow", false);
+    show("apex_desktop_usedAccordionRow", true);
+  }
+
+  it("names the selected offer", () => {
+    expect(readAmazonProduct(parse(accordionHtml), URL_ACCORDION).details.offer).toBe("Buy New");
+  });
+
+  describe("when the shopper picks the Used offer", () => {
+    it("reads the used price, not the hidden new one", () => {
+      const doc = parse(accordionHtml);
+      selectUsedOffer(doc);
+      const reading = readAmazonProduct(doc, URL_ACCORDION);
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft?.items).toEqual([{ name: "Cat water fountain", price_minor: 1399, qty: 1 }]);
+      expect(reading.draft?.total_minor).toBe(1399);
+    });
+
+    it("says it is the used offer, with one unit, and which layers agreed", () => {
+      const doc = parse(accordionHtml);
+      selectUsedOffer(doc);
+      expect(readAmazonProduct(doc, URL_ACCORDION).details).toMatchObject({
+        offer: "Used - Like New",
+        price: "$13.99 via near form + page price",
+        qty: '"1" (offer has no quantity choice)',
+      });
+    });
+
+    it("goes back to the new price when New is selected again", () => {
+      const doc = parse(accordionHtml);
+      selectUsedOffer(doc);
+      expect(extractAmazonProduct(doc, URL_ACCORDION)?.total_minor).toBe(1399);
+      doc.getElementById("usedAccordionRow")!.classList.remove("a-accordion-active");
+      doc.getElementById("newAccordionRow_0")!.classList.add("a-accordion-active");
+      doc.getElementById("apex_desktop_newAccordionRow")!.style.display = "block";
+      doc.getElementById("apex_desktop_usedAccordionRow")!.style.display = "none";
+      expect(extractAmazonProduct(doc, URL_ACCORDION)?.total_minor).toBe(1999);
+    });
+  });
+
+  // The shopper picks "Subscribe & Save": its row becomes active, the others hide.
+  function selectSubscribeOffer(doc: Document): void {
+    for (const id of ["newAccordionRow_0", "usedAccordionRow"]) doc.getElementById(id)!.classList.remove("a-accordion-active");
+    doc.getElementById("snsAccordionRowMiddle")!.classList.add("a-accordion-active");
+    const show = (id: string, on: boolean) => { doc.getElementById(id)!.style.display = on ? "block" : "none"; };
+    show("a-accordion-auto-0", false);
+    show("a-accordion-auto-9", true);
+    show("apex_desktop_newAccordionRow", false);
+    show("apex_desktop_snsAccordionRowMiddle", true);
+  }
+
+  describe("when the shopper picks Subscribe & Save", () => {
+    it("reads the subscription price, not the new price or the hidden bigger-discount tier", () => {
+      const doc = parse(accordionHtml);
+      selectSubscribeOffer(doc);
+      const reading = readAmazonProduct(doc, URL_ACCORDION);
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft?.items).toEqual([{ name: "Cat water fountain", price_minor: 1249, qty: 1 }]);
+      expect(reading.details).toMatchObject({ offer: "Subscribe & Save", price: "$12.49 via near form + page price" });
+    });
+
+    it("uses the subscription's own quantity dropdown", () => {
+      const doc = parse(accordionHtml);
+      selectSubscribeOffer(doc);
+      doc.querySelector<HTMLSelectElement>("#rcxsubsQuan")!.innerHTML = '<option value="3" selected>3</option>';
+      const reading = readAmazonProduct(doc, URL_ACCORDION);
+      expect(reading.draft?.items[0]?.qty).toBe(3);
+      expect(reading.draft?.total_minor).toBe(3747);
+      expect(reading.details.qty).toBe('"3"');
+    });
+  });
+
+  it("a New offer that has a quantity dropdown still uses it", () => {
+    const doc = parse(accordionHtml);
+    const select = doc.querySelector<HTMLSelectElement>("#newAccordionRow_0 select#quantity")!;
+    select.innerHTML = '<option value="1">1</option><option value="3" selected>3</option>';
+    const draft = extractAmazonProduct(doc, URL_ACCORDION);
+    expect(draft?.items[0]?.qty).toBe(3);
+    expect(draft?.total_minor).toBe(5997);
+  });
+
   it("two different prices to pay beside one form are a conflict, not a pick", () => {
     const doc = parse(accordionHtml);
     // A second price to pay in the same row (e.g. a bundle) with another number.

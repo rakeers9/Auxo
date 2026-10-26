@@ -36,6 +36,11 @@ export const AMAZON_SELECTORS = {
   "product.page": "#dp",
   "product.title": "span#productTitle",
   "product.buyBoxAsin": "form#addToCart input#ASIN",
+  // The accordion buy box ("Buy New" / "Used - Like New") keeps every offer's
+  // panel in the page and marks the selected row; only that row's form, price
+  // and quantity are the thing being bought.
+  "product.activeOffer": "#buyBoxAccordion .a-accordion-active",
+  "product.offerLabel": ".accordion-header .a-text-bold",
   "product.buyBoxForm": "form#addToCart",
   "product.buyBoxPrice": "form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen",
   // The price you pay, wherever the layout puts it. Searched outward from the
@@ -46,7 +51,8 @@ export const AMAZON_SELECTORS = {
   "product.priceOffscreen": ".a-offscreen",
   "product.priceWhole": ".a-price-whole",
   "product.priceFraction": ".a-price-fraction",
-  "product.quantity": "form#addToCart select#quantity",
+  // A Subscribe & Save offer has its own quantity dropdown (#rcxsubsQuan).
+  "product.quantity": "form#addToCart select#quantity, form#addToCart select#rcxsubsQuan",
 
   // Added-to-cart page (/cart/smart-wagon)
   "addedToCart.confirmation": "#sw-atc-confirmation",
