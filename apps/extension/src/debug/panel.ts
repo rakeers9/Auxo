@@ -46,7 +46,7 @@ const CSS = `
 .auxo-debug button { font: inherit; color: #eee; background: #333; border: 1px solid #555;
   border-radius: 4px; padding: 1px 8px; cursor: pointer; }
 .auxo-debug .body { padding: 8px 10px; }
-.auxo-debug .collapsed .body { display: none; }
+.auxo-debug.collapsed .body { display: none; }
 .auxo-debug dl { display: grid; grid-template-columns: 90px 1fr; gap: 2px 8px; margin: 0; }
 .auxo-debug dt { color: #999; }
 .auxo-debug dd { margin: 0; word-break: break-all; }

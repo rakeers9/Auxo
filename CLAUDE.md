@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Several Claude Code sessions may build in parallel. Rules:
 
-- **One worktree per session.** Extra sessions work in `.claude/worktrees/<name>` on their own branch. Never edit files in another session's worktree.
+- **Sessions may share a working tree.** Extra sessions can work in `.claude/worktrees/<name>` on their own branch, but several sessions also work in the same checkout and branch at once. If files change that you didn't touch, or the git state moves under you, assume another Claude Code session is working there: run `ListAgents`, then `SendMessage` the peer to say which files you own and ask which are theirs. Commit only your own files by explicit path (never `git add -A` or `git commit -a`), and don't edit a peer's files without messaging them first.
 - **Claim files before editing.** Each session owns the directories it was assigned and touches nothing else. To change something outside your scope, message the owning session first.
 - **Contracts and dependencies are shared.** Announce any change to `packages/shared`, root config, or `package.json`/`pnpm-lock.yaml` to all sessions before making it. Only the coordinating (main) session adds dependencies, so the lockfile doesn't conflict.
 - **Integration branch.** Extension work branches from `extension` and is merged back into `extension` by the coordinating session after the suite passes. Rebase on `extension` before handing work back.

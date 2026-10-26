@@ -53,8 +53,11 @@ describe("selector overrides change what is read", () => {
     const doc = parse(productHtml);
     const price = doc.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")!;
     price.classList.replace("a-offscreen", "price-v2");
+    // The other layers (digit spans, the price under the title) would still
+    // read it, so take them away to leave only the exact selector.
+    doc.querySelectorAll(".a-price-whole").forEach((e) => e.remove());
 
-    expect(readAmazonProduct(doc, PRODUCT_URL).problems).toEqual(["no price in the buy box"]);
+    expect(readAmazonProduct(doc, PRODUCT_URL).problems[0]).toContain("buy box: selector matched nothing");
     const override = { "product.buyBoxPrice": "form#addToCart #corePrice_feature_div .price-v2" };
     expect(readAmazonProduct(doc, PRODUCT_URL, override).draft?.total_minor).toBe(4598);
   });

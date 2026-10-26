@@ -182,6 +182,17 @@ describe("inspectAmazonPage on product pages", () => {
   }
   const buyBoxPrice = (d: Document) => d.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")!;
   const quantity = (d: Document) => d.querySelector<HTMLSelectElement>("form#addToCart select#quantity")!;
+  // Every place the price is read from, gone: the buy box price, the price to
+  // pay anywhere near the form, and the copy under the title.
+  const removeAllPrices = (d: Document) => {
+    d.querySelectorAll(".apex-pricetopay-value").forEach((e) => e.remove());
+    d.getElementById("corePriceDisplay_desktop_feature_div")?.remove();
+  };
+  // The offscreen price says something unreadable and the digit spans are gone.
+  const unreadablePrices = (d: Document) => {
+    buyBoxPrice(d).textContent = "See options";
+    d.querySelectorAll(".a-price-whole").forEach((e) => e.remove());
+  };
 
   it("reports the same draft extractAmazonProduct returns, with raw readings", () => {
     const doc = parse(productHtml);
@@ -191,17 +202,24 @@ describe("inspectAmazonPage on product pages", () => {
     expect(inspection.draft).toEqual(extractAmazonProduct(doc, PRODUCT_URL));
     expect(inspection.details).toEqual({
       asin: "B0TEST0005",
-      "buy box price": '"$45.98"',
-      "page price": "$45.98",
+      price: "$45.98 via buy box + near form + page price",
       qty: '"1"',
       "items sum": "$45.98",
     });
   });
 
   it.each<[string, (d: Document) => void, string]>([
-    ["a missing buy box price", (d) => buyBoxPrice(d).remove(), "no price in the buy box"],
-    ["an unreadable buy box price", (d) => { buyBoxPrice(d).textContent = "See options"; }, 'buy box price "See options" isn\'t a readable price'],
-    ["prices that disagree", (d) => { buyBoxPrice(d).textContent = "$44.98"; }, "buy box price $44.98 but the page shows $45.98"],
+    [
+      "no price anywhere",
+      removeAllPrices,
+      "no price found (buy box: selector matched nothing; near form: no price to pay around the form; page price: not shown)",
+    ],
+    [
+      "prices nobody can read",
+      unreadablePrices,
+      'no price found (buy box: "See options" isn\'t a readable price; near form: a price to pay is there but has no readable number; page price: shown but not readable)',
+    ],
+    ["prices that disagree", (d) => { buyBoxPrice(d).textContent = "$44.98"; }, "conflicting prices: buy box $44.98, near form $44.98, page price $45.98"],
     ["a missing quantity dropdown", (d) => quantity(d).remove(), "no quantity dropdown in the buy box"],
     [
       "a quantity that isn't a number",

@@ -101,6 +101,20 @@ describe("createDebugPanel", () => {
     expect(root.textContent).toContain('<img src=x onerror="alert(1)">');
   });
 
+  it("hides the body when collapsed (the CSS rule matches the panel itself)", () => {
+    const { root } = mount();
+    const css = root.querySelector("style")!.textContent ?? "";
+    const panel = root.querySelector(".auxo-debug")!;
+    const body = root.querySelector(".body")!;
+
+    // The toggle puts `collapsed` on the panel, so the hiding rule must be
+    // `.auxo-debug.collapsed .body`, not a `.collapsed` descendant.
+    const rule = /([^{}]*\.collapsed[^{}]*)\{[^}]*display:\s*none/.exec(css);
+    expect(rule).not.toBeNull();
+    panel.classList.add("collapsed");
+    expect(root.querySelector(rule![1]!.trim())).toBe(body);
+  });
+
   it("collapses and expands, and destroy removes it", () => {
     const { root, panel } = mount();
     const toggle = root.querySelector("button")!;

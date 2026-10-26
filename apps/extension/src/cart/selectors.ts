@@ -10,6 +10,9 @@ export const AMAZON_SELECTORS = {
   "cart.activeItems": '#sc-active-cart [data-name="Active Items"] [data-itemtype="active"][data-asin]',
   // An item just deleted or saved for later stays in the active list, marked.
   "cart.removedItem": '[data-removed="true"]',
+  // An item whose checkbox is unticked stays in the list but is left out of
+  // the subtotal and of checkout (real page: data-isselected="0").
+  "cart.unselectedItem": '[data-isselected="0"]',
   "cart.itemTitle": ".sc-product-title .a-truncate-full",
   "cart.subtotal": "#sc-subtotal-amount-buybox",
   // The nav bar's cart count. It updates with the page, unlike the stale
@@ -33,8 +36,14 @@ export const AMAZON_SELECTORS = {
   "product.page": "#dp",
   "product.title": "span#productTitle",
   "product.buyBoxAsin": "form#addToCart input#ASIN",
+  "product.buyBoxForm": "form#addToCart",
   "product.buyBoxPrice": "form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen",
+  // The price you pay, wherever the layout puts it. Searched outward from the
+  // buy box form; the struck-through list price is skipped.
+  "product.priceToPay": ".priceToPay, .apex-pricetopay-value",
+  "product.listPrice": ".a-text-price",
   "product.pagePrice": "#corePriceDisplay_desktop_feature_div .priceToPay",
+  "product.priceOffscreen": ".a-offscreen",
   "product.priceWhole": ".a-price-whole",
   "product.priceFraction": ".a-price-fraction",
   "product.quantity": "form#addToCart select#quantity",
