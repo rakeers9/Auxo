@@ -23,7 +23,8 @@ import { createCartState } from "../src/api/cart-state";
 import { createDecisionMemory, type RememberedCart } from "../src/api/decision-memory";
 import { createHandoff } from "../src/api/handoff";
 import { createConfigCache, fetchStoreConfig, overridesFor } from "../src/api/store-config";
-import { API_BASE_URL } from "../src/config";
+import { API_BASE_URL, REPORT_READ_FAILURES } from "../src/config";
+import { createReadFailureLimiter, handleReadFailureMessage, isReadFailureMessage, postReadFailure } from "../src/api/read-failures";
 import { saveDecisionToWishlist } from "../src/wishlist/save";
 import { createWishlist } from "../src/wishlist/store";
 import type { CartLoadResult, ClaimResult, ConfigResult, DecisionForResult } from "../src/messages";
@@ -54,6 +55,12 @@ export default defineBackground(() => {
     area: { get: (key) => browser.storage.local.get(key), set: (items) => browser.storage.local.set(items) },
   });
 
+  // Reader failure codes (AUX-47): rate limited across worker restarts.
+  const readFailureLimiter = createReadFailureLimiter({
+    get: (key) => browser.storage.session.get(key),
+    set: (items) => browser.storage.session.set(items),
+  });
+
   // All API calls happen here, so CORS only has to allow the extension origin.
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender.tab?.id;
@@ -77,6 +84,16 @@ export default defineBackground(() => {
       return true;
     }
 
+    if (isReadFailureMessage(message)) {
+      if (!REPORT_READ_FAILURES) return;
+      void handleReadFailureMessage(message, {
+        senderUrl: sender.url ?? sender.tab?.url,
+        version: browser.runtime.getManifest().version,
+        limiter: readFailureLimiter,
+        post: (report) => postReadFailure(report, { baseUrl: API_BASE_URL, fetch: authenticatedFetch }),
+      });
+      return;
+    }
     if (isDecideMessage(message)) {
       const result = handleDecideMessage(message, (cart, trigger) => decide(cart, { baseUrl: API_BASE_URL, fetch: authenticatedFetch }, trigger));
       if (tabId !== undefined) handoff.track(tabId, triggerOf(message), result);

@@ -16,6 +16,8 @@ import { SupabaseSettingsRepository } from "./repositories/supabase-settings-rep
 import { CloudflareClefProvider } from "./services/decision-model-provider.js";
 import { InMemoryStoreConfigRepository } from "./repositories/store-config-repository.js";
 import { SupabaseStoreConfigRepository } from "./repositories/supabase-store-config-repository.js";
+import { InMemoryReadFailureRepository } from "./repositories/read-failure-repository.js";
+import { SupabaseReadFailureRepository } from "./repositories/supabase-read-failure-repository.js";
 
 export function createProductionApp() {
   const config = loadConfig();
@@ -61,6 +63,10 @@ export function createProductionApp() {
     storeConfigRepository: serviceClient
       ? new SupabaseStoreConfigRepository(serviceClient)
       : new InMemoryStoreConfigRepository(),
+    // Reader failure codes (AUX-47).
+    readFailureRepository: serviceClient
+      ? new SupabaseReadFailureRepository(serviceClient)
+      : new InMemoryReadFailureRepository(),
     decisionTtlSeconds: config.decisionTtlSeconds,
     passTtlSeconds: config.passTtlSeconds,
     rateLimitMax: config.rateLimitMax,

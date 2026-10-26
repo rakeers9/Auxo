@@ -2,6 +2,8 @@ import {
   ActivePassQuerySchema,
   CreateRuleSchema,
   DecisionContextSchema,
+  ReadFailureCodeSchema,
+  ReadFailureReportSchema,
   UpdateRuleSchema,
   VerdictSchema,
 } from "@auxo/shared";
@@ -78,5 +80,35 @@ describe("decision context contracts", () => {
     expect(VerdictSchema.safeParse({
       decision_id: context.decision_id, lane: "L0", action: "allow", template_id: "l0-pass", cooldown_seconds: 0,
     }).success).toBe(true);
+  });
+});
+
+describe("read failure contracts", () => {
+  const report = {
+    reader: "amazon_product",
+    page_type: "product",
+    store_host: "www.amazon.com",
+    extension_version: "1.2.3",
+    codes: ["price.no_layer_found", "qty.no_dropdown"],
+    day: "2026-10-26",
+  };
+
+  it("accepts codes only", () => {
+    expect(ReadFailureReportSchema.parse(report)).toEqual(report);
+  });
+
+  it("has a fallback code for problems without a mapping", () => {
+    expect(ReadFailureCodeSchema.options).toContain("unknown");
+  });
+
+  it.each([
+    ["an uppercase host", { store_host: "WWW.AMAZON.COM" }],
+    ["a host with a path", { store_host: "www.amazon.com/dp/B0TEST0001" }],
+    ["a host with a port", { store_host: "127.0.0.1:3001" }],
+    ["21 codes", { codes: ReadFailureCodeSchema.options.slice(0, 21) }],
+    ["a version with text", { extension_version: "1.2.3-beta" }],
+    ["a malformed day", { day: "26-10-2026" }],
+  ])("rejects %s", (_label, change) => {
+    expect(ReadFailureReportSchema.safeParse({ ...report, ...change }).success).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import {
   CreateRuleSchema,
   DecideRequestSchema,
   DecisionEventSchema,
+  ReadFailureReportSchema,
   RuleConfigurationSchemas,
   UpdateBudgetSchema,
   UpdateRuleSchema,
@@ -44,6 +45,10 @@ import {
 } from "./repositories/store-config-repository.js";
 import { StoreConfigService } from "./services/store-config-service.js";
 import {
+  InMemoryReadFailureRepository,
+  type ReadFailureRepository,
+} from "./repositories/read-failure-repository.js";
+import {
   InMemoryRateLimitStore,
   RateLimiter,
   rateLimitKey,
@@ -74,6 +79,7 @@ export interface BuildAppOptions {
   passRepository?: PassRepository;
   passTtlSeconds?: number;
   storeConfigRepository?: StoreConfigRepository;
+  readFailureRepository?: ReadFailureRepository;
   rateLimitMax?: number;
   rateLimitWindowMs?: number;
   rateLimitStore?: RateLimitStore;
@@ -142,6 +148,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     options.storeConfigRepository ?? new InMemoryStoreConfigRepository(),
     (entry) => app.log.warn({ entry }, "Skipped a store config entry"),
   );
+  const readFailureRepository = options.readFailureRepository ?? new InMemoryReadFailureRepository();
   const rateLimiter = new RateLimiter(
     options.rateLimitStore ?? new InMemoryRateLimitStore(),
     options.rateLimitMax ?? 120,
@@ -317,6 +324,23 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     return reply.send(await storeConfigService.getConfig());
   });
 
+  // Why a page couldn't be read, as codes only (AUX-47). Authenticated like
+  // every route (and rate limited with them), but the user is not stored.
+  app.post("/v1/read-failures", async (request, reply) => {
+    const user = await authenticate(request);
+    if (!user) return unauthorized(reply);
+    const parsed = ReadFailureReportSchema.safeParse(request.body);
+    if (!parsed.success) return invalidRequest(reply, "The read failure report is invalid.", parsed.error.flatten());
+    if (!isNearToday(parsed.data.day, new Date())) {
+      return invalidRequest(reply, "The read failure report is invalid.", {
+        formErrors: [],
+        fieldErrors: { day: ["day must be within a day of today (UTC)."] },
+      });
+    }
+    await readFailureRepository.record(parsed.data);
+    return reply.status(204).send();
+  });
+
   const IdParamsSchema = z.object({ id: z.string().uuid() }).strict();
 
   app.get("/v1/rules", async (request, reply) => {
@@ -450,6 +474,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   return app;
+}
+
+// A report's day is the user's UTC day, so it may be yesterday or tomorrow
+// next to the server's clock, but never further.
+function isNearToday(day: string, now: Date): boolean {
+  const offsetDays = (Date.parse(`${day}T00:00:00.000Z`) - Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00.000Z`)) / 86_400_000;
+  return Math.abs(offsetDays) <= 1;
 }
 
 function unauthorized(reply: { status(code: number): { send(payload: unknown): unknown } }) {
