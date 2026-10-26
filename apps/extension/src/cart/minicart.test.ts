@@ -92,6 +92,17 @@ describe("readAmazonMiniCart", () => {
     expect(reading.problems).toEqual(problems);
   });
 
+  it("reads a Subscribe & Save price past the cent from data-displayprice", () => {
+    const doc = parse(sidebarBeforeHtml);
+    const item = doc.querySelector("#nav-flyout-ewc .ewc-item")!;
+    item.setAttribute("data-price", "10.791");
+    item.setAttribute("data-displayprice", "10.79");
+    subtotal(doc).textContent = "$10.79";
+    const reading = readAmazonMiniCart(doc, PRODUCT_URL);
+    expect(reading.problems).toEqual([]);
+    expect(reading.draft?.items).toEqual([{ name: "Unscented hand soap, 12 oz", price_minor: 1079, qty: 1 }]);
+  });
+
   it("finds nothing on a page without the mini cart", () => {
     const doc = parse(cartHtml);
     doc.getElementById("nav-flyout-ewc")?.remove();

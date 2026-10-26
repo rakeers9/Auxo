@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parsePriceToMinor } from "./price";
+import { parsePriceToMinor, parseShownPriceNear } from "./price";
 
 describe("parsePriceToMinor", () => {
   it.each([
@@ -44,5 +44,38 @@ describe("parsePriceToMinor", () => {
 
   it("rejects currencies it has no rules for", () => {
     expect(parsePriceToMinor("9.99", "EUR")).toBeNull();
+  });
+});
+
+describe("parseShownPriceNear", () => {
+  it.each([
+    ["8.982", "8.98", 898], // real Subscribe & Save item: $9.98 less 10%
+    ["8.985", "8.98", 898],
+    ["8.985", "8.99", 899],
+    ["8.989", "8.99", 899],
+    ["17.9640", "17.96", 1796],
+    [" 8.982 ", "$8.98", 898],
+  ])("reads %j shown as %j as %i", (exact, shown, expected) => {
+    expect(parseShownPriceNear(exact, shown, "USD")).toBe(expected);
+  });
+
+  it.each([
+    ["8.982", "8.97"], // more than a cent apart
+    ["8.982", "9.98"],
+    ["8.98", "8.98"], // nothing past the cent: parsePriceToMinor's job
+    ["8.9", "8.90"],
+    ["8.982", ""],
+    ["8.982", "n/a"],
+    ["", "8.98"],
+    ["$8.982", "8.98"],
+    ["8,982", "8.98"],
+    ["-8.982", "8.98"],
+    ["see price in cart", "8.98"],
+  ])("rejects %j shown as %j", (exact, shown) => {
+    expect(parseShownPriceNear(exact, shown, "USD")).toBeNull();
+  });
+
+  it("rejects currencies it has no rules for", () => {
+    expect(parseShownPriceNear("8.982", "8.98", "EUR")).toBeNull();
   });
 });

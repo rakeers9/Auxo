@@ -1,11 +1,13 @@
 import type { CartDraft } from "../messages";
-import { parsePriceToMinor } from "./price";
+import { parsePriceToMinor, parseShownPriceNear } from "./price";
 import { CURRENCY, cleanName, emptyReading, finishReading, quote, type Reading } from "./reading";
 import { resolveAmazonSelectors, withConfigNotes, type SelectorOverrides } from "./selectors";
 
 // Selectors (AMAZON_SELECTORS "cart.*") come from real amazon.com cart pages
 // (sanitized copies live in __fixtures__). Items in the Active Items list carry
 // their own data-price (unit price), data-quantity and data-producttitle.
+// data-price can run past the cent (Subscribe & Save); then data-displayprice,
+// the rounded price the subtotal uses, is read instead.
 
 export function isAmazonHost(url: URL): boolean {
   return url.protocol === "https:" && url.hostname === "www.amazon.com";
@@ -51,7 +53,8 @@ export function readAmazonCart(doc: Document, url: URL, overrides?: SelectorOver
     const label = `item ${index + 1}`;
     const name = cleanName(element.getAttribute("data-producttitle") || element.querySelector(s["cart.itemTitle"])?.textContent);
     const priceText = element.getAttribute("data-price");
-    const priceMinor = parsePriceToMinor(priceText ?? "", CURRENCY);
+    const shownText = element.getAttribute("data-displayprice");
+    const priceMinor = parsePriceToMinor(priceText ?? "", CURRENCY) ?? parseShownPriceNear(priceText ?? "", shownText ?? "", CURRENCY);
     const qtyText = element.getAttribute("data-quantity");
     const qty = qtyText !== null && /^\d+$/.test(qtyText) ? Number(qtyText) : 0;
 

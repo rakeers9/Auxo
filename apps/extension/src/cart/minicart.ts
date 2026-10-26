@@ -1,5 +1,5 @@
 import type { CartDraft } from "../messages";
-import { parsePriceToMinor } from "./price";
+import { parsePriceToMinor, parseShownPriceNear } from "./price";
 import { CURRENCY, cleanName, emptyReading, finishReading, quote, type Reading } from "./reading";
 import { AMAZON_SELECTORS, resolveAmazonSelectors, withConfigNotes, type AmazonSelectors, type SelectorOverrides } from "./selectors";
 
@@ -47,7 +47,8 @@ export function scanMiniCart(doc: Document, s: AmazonSelectors = AMAZON_SELECTOR
     const label = `mini cart item ${index + 1}`;
     const name = cleanName(element.getAttribute("data-producttitle"));
     const priceText = element.getAttribute("data-price");
-    const price = parsePriceToMinor(priceText ?? "", CURRENCY);
+    const shownText = element.getAttribute("data-displayprice");
+    const price = parsePriceToMinor(priceText ?? "", CURRENCY) ?? parseShownPriceNear(priceText ?? "", shownText ?? "", CURRENCY);
     const qtyText = element.getAttribute("data-quantity");
     const qty = qtyText !== null && /^\d+$/.test(qtyText) ? Number(qtyText) : 0;
 

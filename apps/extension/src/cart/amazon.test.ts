@@ -55,6 +55,27 @@ describe("extractAmazonCart", () => {
     });
   });
 
+  it("reads a Subscribe & Save price past the cent from data-displayprice", () => {
+    // A real cart had data-price="8.982" (9.98 less 10%), data-displayprice="8.98"
+    // and a subtotal of $8.98. Same shape here on the cable.
+    const doc = parse(cartHtml);
+    const item = doc.querySelector('#sc-active-cart [data-asin="B0TEST0002"]')!;
+    item.setAttribute("data-price", "8.991");
+    item.setAttribute("data-displayprice", "8.99");
+    doc.querySelector("#sc-subtotal-amount-buybox .sc-price")!.textContent = "$125.84";
+    const reading = readAmazonCart(doc, CART_URL);
+    expect(reading.problems).toEqual([]);
+    expect(reading.draft?.items[1]).toEqual({ ...cable, price_minor: 899 });
+    expect(reading.draft?.total_minor).toBe(12584);
+  });
+
+  it("still gives up when data-displayprice is more than a cent off data-price", () => {
+    const doc = parse(cartHtml);
+    const item = doc.querySelector('#sc-active-cart [data-asin="B0TEST0002"]')!;
+    item.setAttribute("data-price", "8.991");
+    expect(readAmazonCart(doc, CART_URL).problems).toEqual(['item 2 has no readable data-price: "8.991"']);
+  });
+
   it("keeps qty > 1 as one line with a unit price", () => {
     const cart = extractAmazonCart(parse(cartHtml), CART_URL);
     expect(cart?.items[0]).toEqual({ name: mug.name, price_minor: 999, qty: 3 });

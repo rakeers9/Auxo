@@ -29,3 +29,24 @@ export function parsePriceToMinor(text: string, currency: string): number | null
   const minor = Number(whole + fraction);
   return Number.isSafeInteger(minor) ? minor : null;
 }
+
+// Amazon's data-price can carry digits past the minor unit: a Subscribe & Save
+// item at $9.98 less 10% has data-price "8.982" next to data-displayprice
+// "8.98", and the cart subtotal uses the shown $8.98. Returns the shown price
+// only when the exact one is a plain number within one minor unit of it, so a
+// pair that disagrees still reads as unreadable.
+export function parseShownPriceNear(exact: string, shown: string, currency: string): number | null {
+  const spec = CURRENCIES[currency];
+  const shownMinor = parsePriceToMinor(shown, currency);
+  const match = /^(\d+)\.(\d+)$/.exec(exact.trim());
+  if (!spec || shownMinor === null || !match) return null;
+
+  const fraction = match[2] ?? "";
+  const extra = fraction.length - spec.decimals;
+  if (extra <= 0) return null;
+  const scale = 10 ** extra;
+  const exactScaled = Number((match[1] ?? "") + fraction);
+  const shownScaled = shownMinor * scale;
+  if (!Number.isSafeInteger(exactScaled) || !Number.isSafeInteger(shownScaled)) return null;
+  return Math.abs(exactScaled - shownScaled) < scale ? shownMinor : null;
+}
