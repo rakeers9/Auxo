@@ -1,7 +1,7 @@
 import { CartSchema } from "@auxo/shared";
 import { describe, expect, it } from "vitest";
 
-import { extractAmazonAddedToCart, isAmazonAddedToCartPage } from "./added";
+import { extractAmazonAddedToCart, isAmazonAddedToCartPage, readAmazonAddedToCart } from "./added";
 import { isAmazonCartPage } from "./amazon";
 import { isAmazonCheckoutPage } from "./checkout";
 import { hashCart } from "./hash";
@@ -70,6 +70,78 @@ describe("extractAmazonAddedToCart", () => {
     expect(extractAmazonAddedToCart(doc, ADDED_URL)?.items).toEqual([
       { name: "Stainless steel water bottle, 32 oz", price_minor: 2639, qty: 1 },
     ]);
+  });
+
+  describe('"Add all" offers (several items added at once)', () => {
+    // Real URL shape: newItems=<id>,<qty>|<id>,<qty>|... The fixture's mini cart
+    // already lists the other two items; the extra confirmation entries are copies
+    // of the first one (the real page's markup for several items wasn't saved).
+    const ID_CHAIR = "00000000-0000-4000-8000-000000000006";
+    const ID_KEYBOARD = "00000000-0000-4000-8000-000000000007";
+    const multiUrl = (...entries: string[]) => new URL(`https://www.amazon.com/cart/smart-wagon?newItems=${entries.join("|")}&ref_=sw_refresh`);
+    const withConfirmed = (ids: string[]) =>
+      addedWith((d) => {
+        const container = d.querySelector("#add-to-cart-confirmation-image")!;
+        for (const id of ids) {
+          const copy = container.querySelector("[data-itemid]")!.cloneNode(true) as Element;
+          copy.setAttribute("data-itemid", id);
+          container.appendChild(copy);
+        }
+      });
+
+    it("reads every added item at the quantity added", () => {
+      const doc = withConfirmed([ID_CHAIR, ID_KEYBOARD]);
+      const reading = readAmazonAddedToCart(doc, multiUrl(`${ADDED_ID},1`, `${ID_CHAIR},1`, `${ID_KEYBOARD},1`));
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft?.items).toEqual([
+        { name: "Stainless steel water bottle, 32 oz", price_minor: 2639, qty: 1 },
+        { name: "Office chair with lumbar support", price_minor: 12159, qty: 1 },
+        { name: "Wireless keyboard, full size", price_minor: 3999, qty: 1 },
+      ]);
+      expect(reading.draft?.total_minor).toBe(18797);
+      expect(reading.details["added items"]).toBe("3");
+    });
+
+    it.each([2, 5, 9, 40])("reads an offer that adds %i items, not just three", (count) => {
+      // The fixture's added item plus (count - 1) more lines of $10.00, in the
+      // mini cart, the confirmation block, and the cart subtotal.
+      const extra = Array.from({ length: count - 1 }, (_, i) => `00000000-0000-4000-8000-${String(1000 + i).padStart(12, "0")}`);
+      const doc = addedWith((d) => {
+        const line = addedLine(d);
+        const confirmation = d.querySelector("#add-to-cart-confirmation-image")!;
+        for (const [i, id] of extra.entries()) {
+          const lineCopy = line.cloneNode(true) as Element;
+          lineCopy.setAttribute("data-itemid", id);
+          lineCopy.setAttribute("data-producttitle", `Extra item ${i + 1}`);
+          lineCopy.setAttribute("data-price", "10.00");
+          line.after(lineCopy);
+          const imageCopy = confirmation.querySelector("[data-itemid]")!.cloneNode(true) as Element;
+          imageCopy.setAttribute("data-itemid", id);
+          confirmation.appendChild(imageCopy);
+        }
+        subtotal(d).textContent = `$${(217.94 + extra.length * 10).toFixed(2)}`;
+      });
+      const reading = readAmazonAddedToCart(doc, multiUrl(`${ADDED_ID},1`, ...extra.map((id) => `${id},1`)));
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft?.items).toHaveLength(count);
+      expect(reading.draft?.items[count - 1]).toEqual({ name: `Extra item ${count - 1}`, price_minor: 1000, qty: 1 });
+      expect(reading.draft?.total_minor).toBe(2639 + (count - 1) * 1000);
+    });
+
+    it("gives up, naming the item, when one added item's quantity is missing from the URL", () => {
+      const doc = withConfirmed([ID_CHAIR, ID_KEYBOARD]);
+      const reading = readAmazonAddedToCart(doc, multiUrl(`${ADDED_ID},1`, `${ID_CHAIR},1`));
+      expect(reading.draft).toBeNull();
+      expect(reading.problems).toEqual(["the quantity added for added item 3 isn't in the URL (newItems)"]);
+    });
+
+    it("gives up when an added item isn't in the mini cart", () => {
+      const missing = "00000000-0000-4000-8000-0000000000ff";
+      const doc = withConfirmed([missing]);
+      const reading = readAmazonAddedToCart(doc, multiUrl(`${ADDED_ID},1`, `${missing},1`));
+      expect(reading.draft).toBeNull();
+      expect(reading.problems).toEqual(["added item 2 isn't in the mini cart"]);
+    });
   });
 
   it("the extracted item plus its hash is a valid Cart", async () => {

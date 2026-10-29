@@ -58,6 +58,21 @@ const shopify = (change: (c: Record<string, any>) => void) => {
 };
 
 
+const addedSeveral = (ids: string[], ...entries: string[]) =>
+  added(
+    (d) => {
+      const container = d.querySelector("#add-to-cart-confirmation-image")!;
+      for (const id of ids) {
+        const copy = container.querySelector("[data-itemid]")!.cloneNode(true) as Element;
+        copy.setAttribute("data-itemid", id);
+        container.appendChild(copy);
+      }
+    },
+    new URL(`https://www.amazon.com/cart/smart-wagon?newItems=${entries.join("|")}&ref_=sw_refresh`),
+  );
+const ID_CHAIR = "00000000-0000-4000-8000-000000000006";
+const ID_KEYBOARD = "00000000-0000-4000-8000-000000000007";
+
 const failures: Array<[string, () => string[] | Promise<string[]>, ReadFailureCode[]]> = [
   // Cart page
   ["cart: unreadable price", () => cart((d) => cartItem(d).setAttribute("data-price", "see price in cart")), ["item.no_price"]],
@@ -87,6 +102,8 @@ const failures: Array<[string, () => string[] | Promise<string[]>, ReadFailureCo
   ["added: confirmation without the item", () => added((d) => d.querySelector("#add-to-cart-confirmation-image [data-itemid]")!.remove()), ["added.no_item"]],
   ["added: no quantity in the URL", () => added(() => {}, new URL("https://www.amazon.com/cart/smart-wagon?ref_=sw_refresh")), ["added.no_qty_in_url"]],
   ["added: more added than the cart holds", () => added(() => {}, new URL(`https://www.amazon.com/cart/smart-wagon?newItems=${ADDED_ID},2`)), ["added.qty_mismatch"]],
+  ["added: one of several has no quantity in the URL", () => addedSeveral([ID_CHAIR, ID_KEYBOARD], `${ADDED_ID},1`, `${ID_CHAIR},1`), ["added.no_qty_in_url"]],
+  ["added: one of several not in the mini cart", () => addedSeveral(["00000000-0000-4000-8000-0000000000ff"], `${ADDED_ID},1`, "00000000-0000-4000-8000-0000000000ff,1"), ["added.item_not_in_minicart"]],
   ["added: item not in the mini cart", () => added((d) => { addedLine(d).remove(); addedSubtotal(d).textContent = "$191.55"; }), ["added.item_not_in_minicart"]],
   ["added: mini cart doesn't add up", () => added((d) => addedLine(d).setAttribute("data-price", "27.39")), ["total.mismatch"]],
   ["added: no cart subtotal", () => added((d) => addedSubtotal(d).remove()), ["total.missing"]],

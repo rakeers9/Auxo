@@ -39,15 +39,15 @@ export function readAmazonAddedToCart(doc: Document, url: URL, overrides?: Selec
   details["cart items"] = doc.querySelector<HTMLInputElement>(s["addedToCart.cartQuantity"])?.value || "(missing)";
   if (!added) problems.push('no "Added to cart" confirmation on the page');
 
-  const addedIds = [...doc.querySelectorAll(s["addedToCart.addedItems"])].map((el) => el.getAttribute("data-itemid") ?? "");
-  const addedId = addedIds.length === 1 ? addedIds[0] : undefined;
-  if (!addedId) {
-    problems.push(addedIds.length > 1 ? `the confirmation shows ${addedIds.length} added items; only single adds are read` : "the confirmation doesn't show which item was added");
+  // The confirmation names each added item by id. "Add all" offers add several.
+  const addedIds = [...new Set([...doc.querySelectorAll(s["addedToCart.addedItems"])].map((el) => el.getAttribute("data-itemid") ?? ""))];
+  if (addedIds.length === 0 || addedIds.includes("")) {
+    problems.push("the confirmation doesn't show which item was added");
     return withConfigNotes({ draft: null, problems, details }, notes);
   }
 
   // The whole mini cart must add up to this page's cart subtotal, so the
-  // added item's price is trusted only when every line reads cleanly.
+  // added items' prices are trusted only when every line reads cleanly.
   const scan = scanMiniCart(doc, s);
   problems.push(...scan.problems);
   details["mini cart sum"] = formatMinor(scan.sum);
@@ -57,19 +57,34 @@ export function readAmazonAddedToCart(doc: Document, url: URL, overrides?: Selec
   } else if (problems.length === 0 && scan.lines.length > 0 && scan.sum !== subtotal) {
     problems.push(`mini cart sums ${formatMinor(scan.sum)} but the cart subtotal says ${formatMinor(subtotal)}`);
   }
-  const line = scan.lines.find((l) => l.itemId === addedId);
   if (scan.seen - scan.skipped === 0) problems.push("the mini cart is empty or not loaded");
-  else if (!line && scan.problems.length === 0) problems.push("the added item isn't in the mini cart");
 
-  // newItems=<item id>,<qty added>: the mini cart line holds the item's total
-  // quantity in the cart, which may include copies added earlier.
-  const newItems = /^([0-9a-f-]{36}),(\d+)$/i.exec(url.searchParams.get("newItems") ?? "");
-  const addedQty = newItems && newItems[1] === addedId ? Number(newItems[2]) : 0;
-  details["added qty"] = addedQty > 0 ? String(addedQty) : "(not in URL)";
-  if (addedQty < 1) problems.push("the quantity added isn't in the URL (newItems)");
-  else if (line && addedQty > line.qty) problems.push(`URL says ${addedQty} added but the cart holds ${line.qty}`);
+  // newItems=<item id>,<qty added>, or several joined with "|". The mini cart
+  // line holds an item's total quantity in the cart, which may include copies
+  // added earlier.
+  const addedQtys = new Map<string, number>();
+  for (const entry of (url.searchParams.get("newItems") ?? "").split("|")) {
+    const match = /^([0-9a-f-]{36}),(\d+)$/i.exec(entry);
+    if (match?.[1]) addedQtys.set(match[1], Number(match[2]));
+  }
+  details["added qty"] = addedIds.map((id) => String(addedQtys.get(id) ?? "?")).join(", ");
+  if (addedIds.length > 1) details["added items"] = String(addedIds.length);
 
-  const ok = line !== undefined && addedQty >= 1;
-  const items = ok ? [{ name: line.name, price_minor: line.price_minor, qty: addedQty }] : [];
-  return withConfigNotes(finishReading(`${url.origin}${ADDED_PATH}`, items, ok ? line.price_minor * addedQty : null, problems, details), notes);
+  const items: CartDraft["items"] = [];
+  let total = 0;
+  for (const [index, id] of addedIds.entries()) {
+    const label = addedIds.length > 1 ? `added item ${index + 1}` : "the added item";
+    const line = scan.lines.find((l) => l.itemId === id);
+    const addedQty = addedQtys.get(id) ?? 0;
+    if (!line && scan.problems.length === 0 && scan.seen - scan.skipped > 0) problems.push(`${label} isn't in the mini cart`);
+    if (addedQty < 1) problems.push(addedIds.length > 1 ? `the quantity added for ${label} isn't in the URL (newItems)` : "the quantity added isn't in the URL (newItems)");
+    else if (line && addedQty > line.qty) problems.push(`URL says ${addedQty} added but the cart holds ${line.qty}${addedIds.length > 1 ? ` (${label})` : ""}`);
+    if (line && addedQty >= 1) {
+      items.push({ name: line.name, price_minor: line.price_minor, qty: addedQty });
+      total += line.price_minor * addedQty;
+    }
+  }
+
+  const ok = items.length === addedIds.length;
+  return withConfigNotes(finishReading(`${url.origin}${ADDED_PATH}`, ok ? items : [], ok ? total : null, problems, details), notes);
 }
