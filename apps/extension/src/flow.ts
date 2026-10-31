@@ -7,6 +7,11 @@ import type { PendingClick } from "./tracking/pending";
 // answering at all (e.g. it was restarted mid-request).
 export const CONTENT_TIMEOUT_MS = 3_000;
 
+// Backstop for re-checks the page started (no click): at most this many sent
+// per window, per page.
+export const MAX_RECHECKS_PER_WINDOW = 10;
+export const RECHECK_WINDOW_MS = 60_000;
+
 export interface CartFlowDeps {
   // Sync for DOM readers (Amazon); async for stores read over the network
   // (Shopify's /cart.js).
@@ -23,7 +28,7 @@ export interface CartFlowDeps {
 }
 
 export type CartFlowOutcome =
-  | { status: "skipped"; pageType: PageType; reason: "not_shopping_page" | "product_page" | "added_to_cart_page" }
+  | { status: "skipped"; pageType: PageType; reason: "not_shopping_page" | "product_page" | "added_to_cart_page" | "same_cart" | "rate_limited" }
   | { status: "unreadable"; pageType: PageType; problems: string[] }
   | {
       status: "failed_open";
@@ -54,12 +59,14 @@ export interface CartFlow {
 // about (its layouts are endless), so an add to cart is decided on the cart
 // view it leads to (the added-to-cart page, where the whole cart is read), or
 // by the cart sidebar when the page stays. Buy Now is decided on the checkout
-// page it leads to. Every re-check is sent, even an identical cart (tagged
-// same_cart). Any failure lets the user through.
+// page it leads to. Page loads and clicks are always sent; a re-check the page
+// started is sent only when the cart changed. Any failure lets the user through.
 export function createCartFlow(deps: CartFlowDeps): CartFlow {
   const now = deps.now ?? (() => new Date());
   let lastHash: string | null = null;
   let last: LastDecision | null = null;
+  // When recent no-click checks were sent, for the backstop.
+  let recentRechecks: number[] = [];
 
   return {
     lastDecision: () => last,
@@ -92,9 +99,18 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
       const triggerPage: TriggerPageType = pageType === "added_to_cart" ? "cart" : pageType;
 
       const cartHash = await deps.hash(draft);
-      // The same cart again (e.g. the cart area re-rendered) is still sent:
-      // the backend decides what a repeat means. It's tagged so it can tell.
-      const sameCart = !click && cartHash === lastHash;
+      // No click means the page changed by itself. Amazon re-draws the cart
+      // area about once a second, and the same cart again tells the backend
+      // nothing, so only a changed cart is sent (an item Amazon removed, an
+      // edit the click classifier missed). A cart flipping between two states
+      // is capped by the backstop.
+      if (!click) {
+        if (cartHash === lastHash) return { status: "skipped", pageType, reason: "same_cart" };
+        const at = now().getTime();
+        recentRechecks = recentRechecks.filter((t) => t > at - RECHECK_WINDOW_MS);
+        if (recentRechecks.length >= MAX_RECHECKS_PER_WINDOW) return { status: "skipped", pageType, reason: "rate_limited" };
+        recentRechecks.push(at);
+      }
       lastHash = cartHash;
 
       const trigger: Trigger = click
@@ -110,7 +126,6 @@ export function createCartFlow(deps: CartFlowDeps): CartFlow {
             source: "page",
             page_type: triggerPage,
             occurred_at: now().toISOString(),
-            ...(sameCart ? { same_cart: true } : {}),
           };
 
       const result = await withTimeout(

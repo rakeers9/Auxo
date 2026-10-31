@@ -162,16 +162,95 @@ describe("createCartFlow", () => {
     expect(d.requestVerdict).not.toHaveBeenCalled();
   });
 
-  it("re-sends the same cart, tagged same_cart, and leaves the decision to the backend", async () => {
+  it("doesn't re-send the same cart when the page re-draws without a click", async () => {
     const d = deps();
     const flow = createCartFlow(d.deps);
 
     await flow.check();
-    const second = await flow.check();
-    expect(d.requestVerdict).toHaveBeenCalledTimes(2);
+    expect(await flow.check()).toEqual({ status: "skipped", pageType: "cart", reason: "same_cart" });
+    expect(d.requestVerdict).toHaveBeenCalledTimes(1);
     expect(d.requestVerdict.mock.calls[0]?.[1]).not.toHaveProperty("same_cart");
-    expect(d.requestVerdict.mock.calls[1]?.[1]).toMatchObject({ intent: "page_view", same_cart: true });
-    expect(second).toMatchObject({ status: "shown" });
+  });
+
+  it("a cart area that re-draws every second sends one request, not one a second (AUX-49)", async () => {
+    let at = NOW.getTime();
+    const d = deps({ now: () => new Date(at) });
+    const flow = createCartFlow(d.deps);
+
+    await flow.check();
+    for (let i = 0; i < 49; i++) {
+      at += 1_000;
+      await flow.check();
+    }
+    expect(d.requestVerdict).toHaveBeenCalledTimes(1);
+  });
+
+  it("a re-draw that changed the cart is sent, untagged", async () => {
+    let hash = HASH;
+    const d = deps({ hash: async () => hash });
+    const flow = createCartFlow(d.deps);
+
+    await flow.check();
+    hash = "d".repeat(64);
+    expect(await flow.check()).toMatchObject({ status: "shown" });
+    expect(d.requestVerdict).toHaveBeenCalledTimes(2);
+    expect(d.requestVerdict.mock.calls[1]?.[1]).toEqual({
+      intent: "page_view",
+      source: "page",
+      page_type: "cart",
+      occurred_at: NOW.toISOString(),
+    });
+  });
+
+  it("caps a cart flipping between two states at 10 sends a minute, then sends again", async () => {
+    let at = NOW.getTime();
+    let flip = false;
+    const d = deps({ now: () => new Date(at), hash: async () => (flip ? "d" : "c").repeat(64) });
+    const flow = createCartFlow(d.deps);
+
+    // Ten sends end on "d"; then "c" is held back and "d" matches the last sent.
+    const outcomes = [];
+    for (let i = 0; i < 14; i++) {
+      outcomes.push(await flow.check());
+      flip = !flip;
+      at += 1_000;
+    }
+    expect(d.requestVerdict).toHaveBeenCalledTimes(10);
+    expect(outcomes.slice(10).map((o) => (o.status === "skipped" ? o.reason : o.status))).toEqual([
+      "rate_limited",
+      "same_cart",
+      "rate_limited",
+      "same_cart",
+    ]);
+
+    at = NOW.getTime() + 61_000;
+    flip = false;
+    expect(await flow.check()).toMatchObject({ status: "shown" });
+    expect(d.requestVerdict).toHaveBeenCalledTimes(11);
+  });
+
+  it("the backstop never holds back a click", async () => {
+    let flip = false;
+    const d = deps({ hash: async () => (flip ? "d" : "c").repeat(64) });
+    const flow = createCartFlow(d.deps);
+
+    for (let i = 0; i < 12; i++) {
+      await flow.check();
+      flip = !flip;
+    }
+    expect(d.requestVerdict).toHaveBeenCalledTimes(10);
+    expect(await flow.check(click("checkout"))).toMatchObject({ status: "shown" });
+    expect(d.requestVerdict).toHaveBeenCalledTimes(11);
+  });
+
+  it("doesn't retry the same cart on a re-draw after failing open", async () => {
+    const d = deps();
+    d.requestVerdict.mockResolvedValueOnce({ ok: false, reason: "network" });
+    const flow = createCartFlow(d.deps);
+
+    expect(await flow.check()).toMatchObject({ status: "failed_open" });
+    expect(await flow.check()).toMatchObject({ status: "skipped", reason: "same_cart" });
+    expect(d.requestVerdict).toHaveBeenCalledTimes(1);
   });
 
   it("a click is never tagged same_cart", async () => {

@@ -324,9 +324,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   }
 
   const record = (outcome: CartFlowOutcome) => {
-    // A product page is never asked about; its re-renders shouldn't wipe the
-    // answer a cart view gave.
-    if (outcome.status === "skipped" && outcome.reason === "product_page") return;
+    // A product page is never asked about, and a re-draw that wasn't sent
+    // (same cart, or the backstop) keeps the answer the page already has.
+    if (outcome.status === "skipped" && ["product_page", "same_cart", "rate_limited"].includes(outcome.reason)) return;
     switch (outcome.status) {
       case "skipped":
       case "unreadable":
