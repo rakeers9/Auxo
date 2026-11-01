@@ -11,6 +11,7 @@ import type { CartDraft, DecideResult } from "../messages";
 import { listenForBuyIntents } from "./listener";
 import { createMiniCartHandler } from "./minicart-handler";
 import { createPendingStore } from "./pending";
+import { confirmPurchase } from "./purchase";
 import { createTracker } from "./tracker";
 
 // Real (sanitized) Amazon pages, real readers and classifier, fake backend.
@@ -169,6 +170,26 @@ describe("click tracking on real Amazon pages", () => {
     expect(purchase?.decisionId).toBe(verdict.decision_id);
     expect(purchase?.draft.items.length).toBeGreaterThan(0);
     checkout.stop();
+  });
+
+  it("place order, then the confirmation page: bought is sent once against the decision", async () => {
+    const checkout = openPage("amazon-checkout-from-cart.html", "https://www.amazon.com/checkout/p/p-X/spc");
+    await checkout.tracker.onLoad();
+    const read = checkout.requests[0]!.cart;
+    await checkout.click("#submitOrderButtonId");
+    checkout.stop();
+
+    // The next page in the tab is the confirmation page.
+    const sent: DecisionEvent[] = [];
+    confirmPurchase(createPendingStore(sessionStorage), (e) => sent.push(e));
+    confirmPurchase(createPendingStore(sessionStorage), (e) => sent.push(e));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      decision_id: verdict.decision_id,
+      action: "bought",
+      metadata: { items: read.items, total_minor: read.total_minor, currency: read.currency, confirmed: true },
+    });
   });
 
   it("removing an item from the cart after a decision sends a removed event", async () => {

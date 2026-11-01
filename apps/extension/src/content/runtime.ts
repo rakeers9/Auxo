@@ -39,6 +39,7 @@ import { listenForBuyIntents } from "../tracking/listener";
 import { createMiniCartHandler } from "../tracking/minicart-handler";
 import type { MiniCartDiff } from "../tracking/sidesheet";
 import { createPendingStore } from "../tracking/pending";
+import { confirmPurchase } from "../tracking/purchase";
 import { createTracker } from "../tracking/tracker";
 
 // Dev builds (`wxt` or `wxt build --mode development`) show the always-on
@@ -87,6 +88,8 @@ export interface StoreAdapter {
   // Compared at load with the last cart any tab saw, to catch changes made
   // elsewhere (another tab, the app).
   fullCart?(overrides: StoreOverrides | null): CartDraft | null | Promise<CartDraft | null>;
+  // This page confirms that an order went through ("Order placed, thanks").
+  isOrderConfirmation?(overrides: StoreOverrides | null): boolean;
 }
 
 // Clicks whose effect shows up as a cart change (sidebar or /cart.js).
@@ -514,8 +517,19 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     refreshDebug();
   };
 
+  // The order went through: send "bought" for the purchase remembered at the
+  // "Place your order" click (the events list in the debug panel shows it).
+  const confirmOrder = () => {
+    if (!adapter.isOrderConfirmation?.(overrides)) return;
+    const result = confirmPurchase(pending, sendEvent);
+    if (result.status === "no_purchase") note = `order confirmed, but no "Place your order" click was seen in this tab`;
+    if (result.status === "no_decision") note = `order confirmed, but "bought" not sent: the purchase never got a decision`;
+    refreshDebug();
+  };
+
   step(async () => {
     await claimHandoff();
+    confirmOrder();
     await tracker.onLoad();
     await checkElsewhere();
   })();
