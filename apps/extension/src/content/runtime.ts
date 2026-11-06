@@ -6,7 +6,6 @@ import {
 } from "wxt/utils/content-script-ui/shadow-root";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 
-import { buildExitEvent } from "../api/events";
 import { hashCart } from "../cart";
 import { createDebugPanel, type BackendStatus, type DebugPanel } from "../debug/panel";
 import { CONTENT_TIMEOUT_MS, createCartFlow, type CartFlowOutcome } from "../flow";
@@ -41,6 +40,7 @@ import type { MiniCartDiff } from "../tracking/sidesheet";
 import { createPendingStore } from "../tracking/pending";
 import { confirmPurchase } from "../tracking/purchase";
 import { createTracker } from "../tracking/tracker";
+import { handleOverlayExit, type ExitDeps, type PassMessage, type PassReply } from "./exit";
 
 // Dev builds (`wxt` or `wxt build --mode development`) show the always-on
 // debug panel instead of the overlay, to check what the extension reads.
@@ -193,28 +193,23 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   };
 
   // Every exit is logged (design invariant: every override is recorded).
-  // Continuing past an answer also lets the user's own next clicks through.
-  const approvedUntil = new Map<string, number>();
-  const approveOverride = async (verdict: Verdict, synthetic = false): Promise<boolean> => {
-    if (synthetic || verdict.action === "allow") return true;
-    const result = await browser.runtime.sendMessage({ type: "auxo:pass", decisionId: verdict.decision_id }).catch(() => ({ ok: false }));
-    const expiresAt = Date.parse(result?.expiresAt ?? "");
-    if (!result?.ok || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-      note = "Override not authorized yet. Check your sign-in or wait for the cooldown, then try again.";
-      console.info("[Auxo]", note);
+  // Continuing past an answer also lets the user's own next clicks through,
+  // and a failed or slow pass fails open (see handleOverlayExit).
+  const exitDeps: ExitDeps = {
+    requestPass: (decisionId) =>
+      browser.runtime.sendMessage<PassMessage, PassReply | undefined>({ type: "auxo:pass", decisionId }),
+    close: removeOverlay,
+    override: (decisionId, expiresAt) => gate.override(decisionId, expiresAt),
+    saveForLater,
+    sendEvent,
+    note: (text) => {
+      note = text;
+      console.info("[Auxo]", text);
       refreshDebug();
-      return false;
-    }
-    approvedUntil.set(verdict.decision_id, expiresAt);
-    return true;
+    },
+    timeoutMs: CONTENT_TIMEOUT_MS,
   };
-  const onExit = async (verdict: Verdict, action: ExitAction) => {
-    if (action === "overrode" && !await approveOverride(verdict)) return;
-    removeOverlay();
-    if (action === "overrode") gate.override(verdict.decision_id, approvedUntil.get(verdict.decision_id));
-    if (action === "saved") saveForLater(verdict.decision_id);
-    sendEvent(buildExitEvent(verdict.decision_id, action));
-  };
+  const onExit = (verdict: Verdict, action: ExitAction) => handleOverlayExit(verdict, action, exitDeps);
 
   const removeHint = () => {
     hintUi?.remove();
@@ -237,17 +232,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
           verdict,
           {
             onExit: async (action) => {
-              if (action === "overrode" && !await approveOverride(verdict, synthetic)) return;
-              removeOverlay();
-              if (action === "overrode") {
-                gate.override(verdict.decision_id, approvedUntil.get(verdict.decision_id));
-                void showHint(label);
-              }
               // The dev placeholder answer isn't a real decision.
-              if (!synthetic) {
-                if (action === "saved") saveForLater(verdict.decision_id);
-                sendEvent(buildExitEvent(verdict.decision_id, action));
-              }
+              await handleOverlayExit(verdict, action, exitDeps, { synthetic });
+              if (action === "overrode") void showHint(label);
               note = `click on "${label}" was stopped; user chose ${action}`;
               refreshDebug();
             },
