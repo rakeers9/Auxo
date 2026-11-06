@@ -15,6 +15,7 @@ import productHtml from "./__fixtures__/amazon-product.html?raw";
 import addedSrc from "./added.ts?raw";
 import amazonSrc from "./amazon.ts?raw";
 import checkoutSrc from "./checkout.ts?raw";
+import confirmationSrc from "./confirmation.ts?raw";
 import inspectSrc from "./inspect.ts?raw";
 import minicartSrc from "./minicart.ts?raw";
 import productSrc from "./product.ts?raw";
@@ -117,7 +118,15 @@ describe("a bad config never breaks reading", () => {
 });
 
 describe("AMAZON_SELECTORS covers every selector the readers use", () => {
-  const sources = { added: addedSrc, amazon: amazonSrc, checkout: checkoutSrc, inspect: inspectSrc, minicart: minicartSrc, product: productSrc };
+  const sources = {
+    added: addedSrc,
+    amazon: amazonSrc,
+    checkout: checkoutSrc,
+    confirmation: confirmationSrc,
+    inspect: inspectSrc,
+    minicart: minicartSrc,
+    product: productSrc,
+  };
 
   it.each(Object.entries(sources))("%s.ts has no hardcoded selector in a DOM query", (_name, src) => {
     // Any querySelector / querySelectorAll / closest / matches called with a literal.

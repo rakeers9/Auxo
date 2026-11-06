@@ -2,7 +2,7 @@ import type { Reader } from "@auxo/shared";
 import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 
-import { AMAZON_SELECTORS, inspectAmazonPage, readAmazonMiniCart, resolveAmazonSelectors } from "../src/cart";
+import { AMAZON_SELECTORS, inspectAmazonPage, isAmazonOrderConfirmation, readAmazonMiniCart, resolveAmazonSelectors } from "../src/cart";
 import { classifyChange, classifyClick, classifySubmit } from "../src/clicks";
 import { createReadFailureNotifier } from "../src/content/read-failures";
 import { startStore, type StoreAdapter } from "../src/content/runtime";
@@ -48,6 +48,8 @@ const amazon: StoreAdapter = {
     return page;
   },
   panelInspection: (overrides) => inspectAmazonPage(document, new URL(location.href), overrides?.selectors),
+  // "Order placed, thanks!": sends "bought" for the purchase saved at Place your order (AUX-23).
+  isOrderConfirmation: (overrides) => isAmazonOrderConfirmation(document, new URL(location.href), overrides?.selectors),
   panelSidebar: (overrides) => {
     if (!document.querySelector(MINI_CART)) return null;
     const reading = readAmazonMiniCart(document, new URL(location.href), overrides?.selectors);

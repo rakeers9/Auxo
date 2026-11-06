@@ -61,6 +61,11 @@ export const AMAZON_SELECTORS = {
   "addedToCart.cartSubtotal": "#sw-subtotal .a-offscreen",
   "addedToCart.cartQuantity": "input#sw-total-quantity",
 
+  // Order confirmation (/gp/buy/thankyou/...): the green "Order placed,
+  // thanks!" alert. A page without it (a failed or pending order) isn't a
+  // confirmed purchase.
+  "confirmation.placed": "#widget-purchaseConfirmationStatus .a-alert-inline-success",
+
   // Nav mini cart (#nav-flyout-ewc), on most pages
   "minicart.lines": '#nav-flyout-ewc .ewc-item[data-itemtype="active"][data-asin]',
   // A removed / saved-for-later line keeps its old data; only its message shows.

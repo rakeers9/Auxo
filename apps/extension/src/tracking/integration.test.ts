@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { CartSchema, DecideRequestSchema, type Cart, type DecisionEvent, type Trigger, type Verdict } from "@auxo/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { hashCart, inspectAmazonPage, readAmazonMiniCart } from "../cart";
+import { hashCart, inspectAmazonPage, isAmazonOrderConfirmation, readAmazonMiniCart } from "../cart";
 import { classifyClick, classifySubmit } from "../clicks";
 import { createCartFlow } from "../flow";
 import type { CartDraft, DecideResult } from "../messages";
@@ -179,7 +179,10 @@ describe("click tracking on real Amazon pages", () => {
     await checkout.click("#submitOrderButtonId");
     checkout.stop();
 
-    // The next page in the tab is the confirmation page.
+    // The next page in the tab is the real confirmation page.
+    document.documentElement.innerHTML = readFileSync(resolve(FIXTURES, "amazon-order-confirmation.html"), "utf8");
+    const confirmationUrl = new URL("https://www.amazon.com/gp/buy/thankyou/handlers/display.html?purchaseId=X");
+    expect(isAmazonOrderConfirmation(document, confirmationUrl)).toBe(true);
     const sent: DecisionEvent[] = [];
     confirmPurchase(createPendingStore(sessionStorage), (e) => sent.push(e));
     confirmPurchase(createPendingStore(sessionStorage), (e) => sent.push(e));
