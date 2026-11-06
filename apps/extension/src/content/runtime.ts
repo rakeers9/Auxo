@@ -90,7 +90,9 @@ export interface StoreAdapter {
   // elsewhere (another tab, the app).
   fullCart?(overrides: StoreOverrides | null): CartDraft | null | Promise<CartDraft | null>;
   // This page confirms that an order went through ("Order placed, thanks").
-  isOrderConfirmation?(overrides: StoreOverrides | null): boolean;
+  // May wait a little for the page to finish drawing; `signal` aborts the
+  // wait when the content script goes away.
+  isOrderConfirmation?(overrides: StoreOverrides | null, signal: AbortSignal): boolean | Promise<boolean>;
 }
 
 // Clicks whose effect shows up as a cart change (sidebar or /cart.js).
@@ -522,8 +524,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   // The order went through: send "bought" for the purchase remembered at the
   // "Place your order" click (the events list in the debug panel shows it).
-  const confirmOrder = () => {
-    if (!adapter.isOrderConfirmation?.(overrides)) return;
+  const confirmOrder = async () => {
+    const placed = await Promise.resolve(adapter.isOrderConfirmation?.(overrides, ctx.signal)).catch(() => false);
+    if (!placed || ctx.isInvalid) return;
     const result = confirmPurchase(pending, sendEvent);
     if (result.status === "no_purchase") note = `order confirmed, but no "Place your order" click was seen in this tab`;
     if (result.status === "no_decision") note = `order confirmed, but "bought" not sent: the purchase never got a decision`;
@@ -532,7 +535,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   step(async () => {
     await claimHandoff();
-    confirmOrder();
+    // Doesn't hold up the page: on the thank-you page it may wait a few
+    // seconds for Amazon to draw "Order placed".
+    void confirmOrder();
     await tracker.onLoad();
     await checkElsewhere();
   })();

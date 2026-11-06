@@ -2,7 +2,7 @@ export { extractAmazonAddedToCart, isAmazonAddedToCartPage } from "./added";
 export { extractAmazonCart, isAmazonCartPage } from "./amazon";
 export { readAmazonMiniCart } from "./minicart";
 export { extractAmazonCheckout, isAmazonCheckoutPage } from "./checkout";
-export { isAmazonOrderConfirmation } from "./confirmation";
+export { isAmazonOrderConfirmation, waitForAmazonOrderConfirmation } from "./confirmation";
 export { CHECKOUT_THRESHOLD, isCheckoutCandidate, scoreCheckout } from "./generic";
 export type { CheckoutScore, CheckoutSignal } from "./generic";
 export { hashCart } from "./hash";
