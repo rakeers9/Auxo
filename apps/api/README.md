@@ -247,13 +247,25 @@ Create a budget period with `POST /v1/budgets`:
   "currency": "USD",
   "limit_minor": 50000,
   "period_start": "2026-10-01",
-  "period_end": "2026-10-31"
+  "period_end": "2026-10-31",
+  "repeats": false
 }
 ```
 
 Money is always represented in minor units. The backend initializes
 `spent_minor` to zero; clients cannot directly overwrite it. `GET /v1/budgets`
-returns `{ "budgets": [...] }`, and `PATCH /v1/budgets/:id` changes the limit.
+returns `{ "budgets": [...] }`, and `PATCH /v1/budgets/:id` changes the limit
+(`limit_minor`) or `repeats`.
+
+With `"repeats": true` (optional, default false), the same number of days
+starts again right after each cycle ends, forever, with the same limit and
+spending back at zero. A Nov 1-5 budget runs Nov 1-5, Nov 6-10, Nov 11-15, and
+so on. A budget is returned for its current cycle: `period_start`/`period_end`
+are that cycle's dates, `spent_minor` is what was spent in it, and
+`period_days` is the cycle length. Turning `repeats` off ends the budget after
+its current cycle. All dates are UTC. The cycle math is in
+`src/services/budget-period.ts` and, for `bought` events, in the
+`record_decision_event` SQL function; keep them in step.
 
 ## Store config
 
