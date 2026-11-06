@@ -25,6 +25,7 @@ import { createHandoff } from "../src/api/handoff";
 import { createConfigCache, fetchStoreConfig, overridesFor } from "../src/api/store-config";
 import { API_BASE_URL, REPORT_READ_FAILURES } from "../src/config";
 import { createReadFailureLimiter, handleReadFailureMessage, isReadFailureMessage, postReadFailure } from "../src/api/read-failures";
+import { isSettingsMessage, runSettingsRequest } from "../src/settings/client";
 import { saveDecisionToWishlist } from "../src/wishlist/save";
 import { createWishlist } from "../src/wishlist/store";
 import type { CartLoadResult, ClaimResult, ConfigResult, DecisionForResult } from "../src/messages";
@@ -76,6 +77,21 @@ export default defineBackground(() => {
           return { ok: !!result && !result.error };
         } catch { return { ok: false }; }
       })().then(sendResponse);
+      return true;
+    }
+    // Rules and budgets (AUX-50), and who is signed in: Options page only.
+    if (isSettingsMessage(message) || message?.type === "auxo:account") {
+      if (sender.url !== browser.runtime.getURL("/options.html")) return;
+      if (isSettingsMessage(message)) {
+        void runSettingsRequest(message.request, { baseUrl: API_BASE_URL, fetch: authenticatedFetch }).then(sendResponse);
+      } else {
+        void (async () => {
+          try {
+            const { data } = (await (await authClient())?.auth.getSession()) ?? { data: { session: null } };
+            return { signedIn: !!data.session, email: data.session?.user.email ?? null };
+          } catch { return { signedIn: false, email: null }; }
+        })().then(sendResponse);
+      }
       return true;
     }
     if (message?.type === "auxo:pass" && typeof message.decisionId === "string") {

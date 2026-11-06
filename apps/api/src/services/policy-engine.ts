@@ -31,7 +31,21 @@ const RULE_REASON_CODES: Record<RuleType, DecisionReasonCode> = {
   cart_total: "rule.cart_total",
   merchant: "rule.merchant",
   item_keyword: "rule.item_keyword",
+  description: "rule.description",
 };
+
+// A free-text rule counts as matched when the model thinks it more likely
+// applies than not (AUX-50).
+export const DESCRIPTION_RULE_MATCH_THRESHOLD = 0.5;
+// A matched free-text rule with no lane of its own, when the model gave none.
+export const DESCRIPTION_RULE_FALLBACK_LANE: Lane = "L1";
+
+// The model's answer for one free-text rule (see decision-model-provider.ts).
+export interface DescriptionRuleAnswer {
+  rule_id: string;
+  applies: number;
+  lane?: Lane | undefined;
+}
 
 export interface PolicyState {
   cart: Cart;
@@ -95,6 +109,24 @@ export function evaluatePolicyWithContext(state: PolicyState): PolicyEvaluation 
   return { lane, factors };
 }
 
+// Free-text rules can't be checked by code: the decision model says whether
+// each applies. The lane is the rule's own, else the model's pick for it,
+// else DESCRIPTION_RULE_FALLBACK_LANE. A rule with no answer (model off,
+// failed, or timed out) isn't matched, so it fails open.
+export function evaluateDescriptionRules(rules: Rule[], answers: readonly DescriptionRuleAnswer[]): PolicyFactor[] {
+  const byRule = new Map(answers.map((answer) => [answer.rule_id, answer]));
+  const factors: PolicyFactor[] = [];
+  for (const rule of rules) {
+    if (!rule.enabled || rule.rule_type !== "description") continue;
+    const parsed = RuleConfigurationSchemas.description.safeParse(rule.configuration);
+    const answer = byRule.get(rule.id);
+    if (!parsed.success || !answer || answer.applies < DESCRIPTION_RULE_MATCH_THRESHOLD) continue;
+    const lane = parsed.data.lane ?? answer.lane ?? DESCRIPTION_RULE_FALLBACK_LANE;
+    factors.push({ code: RULE_REASON_CODES.description, source: "rule", lane, rule });
+  }
+  return factors;
+}
+
 export function createPolicyVerdict(decisionId: string, lane: Lane): Verdict {
   const policy = LANE_POLICY[lane];
   return {
@@ -148,6 +180,9 @@ function evaluateRule(rule: Rule, cart: Cart): Lane | null {
         ? parsed.data.lane
         : null;
     }
+    // Decided by the model, in evaluateDescriptionRules.
+    case "description":
+      return null;
     default:
       return null;
   }

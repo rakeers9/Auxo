@@ -54,6 +54,7 @@ export const OVERLAY_CSS = `
 }
 .auxo-banner .auxo-title { font-size: 15px; margin-bottom: 4px; }
 .auxo-body { margin: 0; }
+.auxo-why { margin: 8px 0 0; font-size: 13px; opacity: 0.8; overflow-wrap: anywhere; }
 .auxo-stopped { margin: 0 0 8px; font-weight: 600; }
 .auxo-countdown {
   margin: 16px 0 0;

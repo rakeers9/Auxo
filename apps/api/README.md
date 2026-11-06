@@ -73,9 +73,24 @@ Cloudflare Clef integration is configured.
 
 Set both `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` to enable Clef on
 Workers AI. The API sends the cart, enabled rules, budgets, and deterministic
-policy lane to one typed choice question. Clef returns L0 through L4 with
-probabilities and confidence; Auxo always selects the stricter of Clef and the
-deterministic policy, so the model cannot weaken a hard rule or budget block.
+policy lane to one typed choice question (`intervention_lane`), where Clef
+returns L0 through L4 with probabilities and confidence.
+
+Free-text rules (`rule_type: "description"`, AUX-50) are judged by Clef too: each
+gets a yes/no `noul` question (`rule.<id>.applies`), and a rule without a lane
+also gets a lane question (`rule.<id>.lane`). At most 31 free-text rules are
+sent, which keeps the request under Clef's 64-question limit. A rule counts as
+matched at a probability of 0.5 or more.
+
+How the lane is picked:
+
+- When any of the user's rules or budgets match, the strictest of their lanes
+  wins and Clef's own `intervention_lane` is ignored. So a matched rule's lane,
+  L0 included, is never overridden by the model.
+- A matched free-text rule uses its own lane, else Clef's pick for it, else L1.
+- When nothing the user set up matches, Clef's `intervention_lane` is used.
+- If Clef fails or times out, free-text rules can't match (fail open), and the
+  other rules and budgets still apply.
 
 The Clef request has a configurable short timeout (`DECISION_MODEL_TIMEOUT_MS`,
 2000 ms by default), no automatic retries, and never exposes the token to the

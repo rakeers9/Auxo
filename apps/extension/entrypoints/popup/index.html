@@ -77,11 +77,22 @@
       }
       .auxo-remove:hover { border-color: var(--muted); }
       .auxo-remove:disabled { opacity: 0.5; cursor: default; }
+      .auxo-footer { padding: 8px 16px 12px; border-top: 1px solid var(--line); }
+      .auxo-settings {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        font: inherit;
+        cursor: pointer;
+      }
+      .auxo-settings:hover { text-decoration: underline; }
       :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <footer class="auxo-footer"><button id="open-settings" type="button" class="auxo-settings">Rules and limits</button></footer>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

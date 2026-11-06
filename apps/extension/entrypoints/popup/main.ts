@@ -16,3 +16,9 @@ if (root) {
     if (area === "local" && WISHLIST_KEY in changes) void view.refresh();
   });
 }
+
+// Rules and budgets live on the Options page (AUX-50).
+document.getElementById("open-settings")?.addEventListener("click", () => {
+  void browser.runtime.openOptionsPage();
+  window.close();
+});

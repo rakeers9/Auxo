@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 
 import type { Budget, Cart, Rule } from "@auxo/shared";
-import { createPolicyVerdict, evaluatePolicy, evaluatePolicyWithContext } from "./policy-engine.js";
+import {
+  createPolicyVerdict,
+  DESCRIPTION_RULE_FALLBACK_LANE,
+  DESCRIPTION_RULE_MATCH_THRESHOLD,
+  evaluateDescriptionRules,
+  evaluatePolicy,
+  evaluatePolicyWithContext,
+} from "./policy-engine.js";
 import { createStubVerdict, stubLane } from "./stub-decision.js";
 
 const now = new Date("2026-10-15T12:00:00.000Z");
@@ -129,5 +136,66 @@ describe("lane verdicts", () => {
       template_id: "l3-block",
       cooldown_seconds: 300,
     });
+  });
+});
+
+describe("evaluateDescriptionRules (AUX-50)", () => {
+  const clothes = (lane?: string) =>
+    rule("description", { description: "I don't want to buy clothes", ...(lane ? { lane } : {}) });
+
+  it("never matches a free-text rule from code alone", () => {
+    expect(evaluatePolicyWithContext({ cart, now, budgets: [], rules: [clothes("L3")] })).toEqual({
+      lane: "L0",
+      factors: [{ code: "no_policy_match", source: "policy", lane: "L0" }],
+    });
+  });
+
+  it("uses the rule's own lane when the model says it applies, whatever lane the model picked", () => {
+    const rules = [clothes("L2")];
+    const [factor, ...rest] = evaluateDescriptionRules(rules, [{ rule_id: rules[0]!.id, applies: 0.9, lane: "L4" }]);
+    expect(rest).toEqual([]);
+    expect(factor).toMatchObject({ code: "rule.description", source: "rule", lane: "L2", rule: rules[0] });
+  });
+
+  it("keeps a rule's own L0", () => {
+    const rules = [clothes("L0")];
+    expect(evaluateDescriptionRules(rules, [{ rule_id: rules[0]!.id, applies: 0.9 }])).toMatchObject([{ lane: "L0" }]);
+  });
+
+  it("uses the model's lane for a rule without one, and L1 when the model gave none", () => {
+    const picked = clothes();
+    const unpicked = clothes();
+    const factors = evaluateDescriptionRules([picked, unpicked], [
+      { rule_id: picked.id, applies: 0.8, lane: "L3" },
+      { rule_id: unpicked.id, applies: 0.8 },
+    ]);
+    expect(factors.map((factor) => [factor.rule?.id, factor.lane])).toEqual([
+      [picked.id, "L3"],
+      [unpicked.id, DESCRIPTION_RULE_FALLBACK_LANE],
+    ]);
+    expect(DESCRIPTION_RULE_FALLBACK_LANE).toBe("L1");
+  });
+
+  it("matches only at or above the threshold", () => {
+    const at = clothes("L2");
+    const below = clothes("L2");
+    const factors = evaluateDescriptionRules([at, below], [
+      { rule_id: at.id, applies: DESCRIPTION_RULE_MATCH_THRESHOLD },
+      { rule_id: below.id, applies: DESCRIPTION_RULE_MATCH_THRESHOLD - 0.01 },
+    ]);
+    expect(factors.map((factor) => factor.rule?.id)).toEqual([at.id]);
+  });
+
+  it("fails open: no answer, a disabled rule, or a broken configuration never matches", () => {
+    const unanswered = clothes("L4");
+    const disabled = { ...clothes("L4"), enabled: false };
+    const broken = rule("description", { description: "", lane: "L4" });
+    const answers = [disabled, broken].map((r) => ({ rule_id: r.id, applies: 1 }));
+    expect(evaluateDescriptionRules([unanswered, disabled, broken], answers)).toEqual([]);
+  });
+
+  it("ignores answers for other rule types", () => {
+    const total = rule("cart_total", { threshold_minor: 1_000_000, lane: "L4" });
+    expect(evaluateDescriptionRules([total], [{ rule_id: total.id, applies: 1 }])).toEqual([]);
   });
 });

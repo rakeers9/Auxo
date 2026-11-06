@@ -693,6 +693,32 @@ describe("rule settings", () => {
     expect(stored.configuration).toEqual({ lane: "L2", merchants: ["amazon.com"] });
   });
 
+  it("creates a free-text rule and changes its lane, including back to none (AUX-50)", async () => {
+    const app = await buildApp();
+    openApps.push(app);
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/rules",
+      payload: { name: "No clothes", rule_type: "description", configuration: { description: "I don't want to buy clothes", lane: "L2" }, enabled: true },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const update = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${created.json().id}`,
+      payload: { configuration: { description: "I don't want to buy clothes" } },
+    });
+
+    expect(update.statusCode).toBe(200);
+    expect(update.json().configuration).toEqual({ description: "I don't want to buy clothes" });
+    const wrongShape = await app.inject({
+      method: "PATCH",
+      url: `/v1/rules/${created.json().id}`,
+      payload: { configuration: { lane: "L2", keywords: ["shirt"] } },
+    });
+    expect(wrongShape.statusCode).toBe(400);
+  });
+
   it("updates a configuration that fits the stored rule type", async () => {
     const app = await buildApp();
     openApps.push(app);

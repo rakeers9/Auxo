@@ -2,7 +2,7 @@ import type { Lane, Verdict } from "@auxo/shared";
 import { VerdictSchema } from "@auxo/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatSeconds, renderOverlay, type OverlayHandle } from "./render";
+import { formatSeconds, reasonLine, renderOverlay, type OverlayHandle } from "./render";
 import { LANE_TEMPLATES } from "./templates";
 
 const COOLDOWN: Record<Lane, number> = { L0: 0, L1: 0, L2: 60, L3: 300, L4: 900 };
@@ -330,5 +330,76 @@ describe("formatSeconds", () => {
     [905, "15:05"],
   ])("%i -> %s", (input, expected) => {
     expect(formatSeconds(input)).toBe(expected);
+  });
+});
+
+describe("why the overlay showed up (AUX-50)", () => {
+  type Context = NonNullable<Verdict["context"]>;
+  function context(lane: Lane, overrides: Partial<Context> = {}): Context {
+    return {
+      decision_id: "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f",
+      cart_summary: { merchant: "amazon.com", total_minor: 2_500, currency: "USD", item_count: 1 },
+      budget: null,
+      matched_rules: [],
+      model_signal: null,
+      decisive_factors: [{ code: "no_policy_match", source: "policy", lane }],
+      available_actions: ["continue"],
+      ...overrides,
+    };
+  }
+  const rule = (name: string, lane: Lane) => ({
+    rule_id: "11111111-1111-4111-8111-111111111111",
+    name,
+    rule_type: "description" as const,
+    lane,
+  });
+
+  it("names the user's rule that set the lane", () => {
+    const v = verdict("L2", { context: context("L2", { matched_rules: [rule("I don't want to buy clothes", "L2")] }) });
+    expect(reasonLine(v)).toBe("Your rule: “I don't want to buy clothes”.");
+  });
+
+  it("counts other rules at the same lane and skips weaker ones", () => {
+    const v = verdict("L3", {
+      context: context("L3", { matched_rules: [rule("Weak", "L1"), rule("Clothes", "L3"), rule("Shoes", "L3")] }),
+    });
+    expect(reasonLine(v)).toBe("Your rules: “Clothes” and 1 more.");
+  });
+
+  it("names the budget when it set the lane", () => {
+    const v = verdict("L4", {
+      context: context("L4", {
+        matched_rules: [rule("Clothes", "L1")],
+        decisive_factors: [
+          { code: "rule.description", source: "rule", lane: "L1" },
+          { code: "budget.exceeded", source: "budget", lane: "L4" },
+        ],
+      }),
+    });
+    expect(reasonLine(v)).toBe("This would put you over your spending limit.");
+  });
+
+  it("says nothing when the model's own pick or the stub set the lane, or there's no context", () => {
+    expect(reasonLine(verdict("L2"))).toBeUndefined();
+    expect(reasonLine(verdict("L2", { context: context("L2", { decisive_factors: [{ code: "model.escalation", source: "model", lane: "L2" }] }) }))).toBeUndefined();
+  });
+
+  it("shows the line as text in the banner and in the pause dialog", () => {
+    const sneaky = "<img src=x onerror=alert(1)>";
+    for (const lane of ["L1", "L2"] as const) {
+      const root = mount();
+      const shown = renderOverlay(root, verdict(lane, { context: context(lane, { matched_rules: [rule(sneaky, lane)] }) }), { onExit: vi.fn() });
+      const line = root.querySelector('[data-role="why"]');
+      expect(line?.textContent).toBe(`Your rule: “${sneaky}”.`);
+      expect(root.querySelector("img")).toBeNull();
+      shown?.destroy();
+    }
+  });
+
+  it("adds no line without a reason", () => {
+    const root = mount();
+    const shown = renderOverlay(root, verdict("L3"), { onExit: vi.fn() });
+    expect(root.querySelector('[data-role="why"]')).toBeNull();
+    shown?.destroy();
   });
 });

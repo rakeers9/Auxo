@@ -17,7 +17,14 @@ import type { DecisionRecord, DecisionRepository } from "../repositories/decisio
 import { HISTORY_WINDOW_DAYS, type HistoryRepository } from "../repositories/history-repository.js";
 import type { SettingsRepository } from "../repositories/settings-repository.js";
 import type { DecisionModelProvider, DecisionSignal } from "./decision-model-provider.js";
-import { createPolicyVerdict, evaluatePolicyWithContext, maxLane, policyVersion, type PolicyEvaluation } from "./policy-engine.js";
+import {
+  createPolicyVerdict,
+  evaluateDescriptionRules,
+  evaluatePolicyWithContext,
+  maxLane,
+  policyVersion,
+  type PolicyEvaluation,
+} from "./policy-engine.js";
 import { stubLane } from "./stub-decision.js";
 
 export const STUB_POLICY_VERSION = "stub-v1";
@@ -61,6 +68,9 @@ interface Outcome {
   policyVersion: string;
   modelProvider: DecisionRecord["modelProvider"];
   modelVersion: string;
+  // What the policy matched, including free-text rules the model judged.
+  // Absent when only the deterministic evaluation is known.
+  evaluation?: PolicyEvaluation;
 }
 
 export class DecisionService {
@@ -127,7 +137,7 @@ export class DecisionService {
 
     const expiresAt = new Date(now.getTime() + this.options.ttlSeconds * 1_000);
     const history = await historyPromise;
-    const context = createDecisionContext(outcome, cart, budgets, now, policyEvaluation, history);
+    const context = createDecisionContext(outcome, cart, budgets, now, outcome.evaluation ?? policyEvaluation, history);
 
     await this.options.repository.save({
       userId,
@@ -194,14 +204,24 @@ export class DecisionService {
       }
     }
 
-    const lane = modelSignal ? maxLane(deterministicLane, modelSignal.lane) : deterministicLane;
-    const decisiveFactors: DecisiveFactor[] = evaluation.factors.map(({ code, source, lane: factorLane }) => ({
+    // AUX-50: what the user set up decides the lane. Their rules and budgets
+    // (free-text rules as judged by the model) give lanes, and the strictest
+    // wins. The model's own lane pick only counts when none of them matched,
+    // so a matched rule's lane (L0 included) is never overridden by it.
+    const userFactors = [
+      ...evaluation.factors.filter((factor) => factor.source !== "policy"),
+      ...evaluateDescriptionRules(rules, modelSignal?.rules ?? []),
+    ];
+    const userLane = userFactors.reduce((lane, factor) => maxLane(lane, factor.lane), deterministicLane);
+    const lane = userFactors.length === 0 && modelSignal ? maxLane(userLane, modelSignal.lane) : userLane;
+    const finalEvaluation: PolicyEvaluation = userFactors.length > 0 ? { lane: userLane, factors: userFactors } : evaluation;
+    const decisiveFactors: DecisiveFactor[] = finalEvaluation.factors.map(({ code, source, lane: factorLane }) => ({
       code,
       source,
       lane: factorLane,
     }));
-    // Whenever the model is stricter than the policy, say so, with or without rules.
-    if (modelSignal && lane !== deterministicLane) {
+    // When the model's own pick set the lane, say so.
+    if (modelSignal && lane !== userLane) {
       decisiveFactors.push({ code: "model.escalation", source: "model", lane: modelSignal.lane });
     }
 
@@ -212,6 +232,7 @@ export class DecisionService {
       policyVersion: provider ? `${baseVersion}:model:${provider.modelVersion}` : baseVersion,
       modelProvider: modelSignal ? "cloudflare-clef" : provider ? "model-fallback" : "policy-engine",
       modelVersion: modelSignal?.model ?? (hasPolicyData ? "v1" : "deterministic-v1"),
+      evaluation: finalEvaluation,
     };
   }
 }

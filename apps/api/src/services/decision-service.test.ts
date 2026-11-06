@@ -216,6 +216,141 @@ describe("DecisionService", () => {
     });
   });
 
+  describe("free-text rules (AUX-50)", () => {
+    type Answers = Array<{ rule: string; applies: number; lane?: "L0" | "L1" | "L2" | "L3" | "L4" }>;
+    async function setup(
+      rules: Array<{ id: string; configuration: Record<string, unknown>; rule_type?: "description" | "cart_total" }>,
+      modelLane: "L0" | "L1" | "L2" | "L3" | "L4",
+      answers: Answers | "fails",
+      budgetLimitMinor?: number,
+    ) {
+      const settingsRepository = new InMemorySettingsRepository();
+      const ids = new Map<string, string>();
+      for (const rule of rules) {
+        const created = await settingsRepository.createRule("user-1", {
+          name: rule.id,
+          rule_type: rule.rule_type ?? "description",
+          configuration: rule.configuration,
+          enabled: true,
+        });
+        ids.set(rule.id, created.id);
+      }
+      if (budgetLimitMinor !== undefined) {
+        await settingsRepository.createBudget("user-1", { currency: "USD", limit_minor: budgetLimitMinor, period_start: "2026-11-01", period_end: "2026-11-30" });
+      }
+      const evaluate = vi.fn<DecisionModelProvider["evaluate"]>(async () => {
+        if (answers === "fails") throw new Error("timeout");
+        return {
+          lane: modelLane,
+          confidence: 0.8,
+          probabilities: { L0: 0.2, L1: 0.2, L2: 0.2, L3: 0.2, L4: 0.2 },
+          model: "clef-test",
+          rules: answers.map(({ rule, applies, lane }) => ({ rule_id: ids.get(rule)!, applies, ...(lane ? { lane } : {}) })),
+        };
+      });
+      const service = new DecisionService({
+        repository: new InMemoryDecisionRepository(),
+        settingsRepository,
+        decisionModelProvider: { modelVersion: "clef-test", evaluate },
+        ttlSeconds: 60,
+        now: () => new Date("2026-11-06T12:00:00.000Z"),
+        onDecisionModelError: () => undefined,
+      });
+      return { service, ids, evaluate };
+    }
+
+    it("uses a matched rule's lane, not the model's own pick", async () => {
+      const { service, ids } = await setup([{ id: "clothes", configuration: { description: "No clothes", lane: "L2" } }], "L4", [
+        { rule: "clothes", applies: 0.9 },
+      ]);
+
+      const verdict = await service.decide("user-1", cart);
+
+      expect(verdict).toMatchObject({ lane: "L2", action: "pause" });
+      expect(verdict.context?.matched_rules).toEqual([{ rule_id: ids.get("clothes"), name: "clothes", rule_type: "description", lane: "L2" }]);
+      expect(verdict.context?.decisive_factors).toEqual([{ code: "rule.description", source: "rule", lane: "L2" }]);
+      expect(DecisionContextSchema.safeParse(verdict.context).success).toBe(true);
+    });
+
+    it("keeps a matched L0 rule even when the model would add friction", async () => {
+      const { service } = await setup([{ id: "groceries", configuration: { description: "Groceries are fine", lane: "L0" } }], "L3", [
+        { rule: "groceries", applies: 0.95 },
+      ]);
+
+      expect((await service.decide("user-1", cart)).lane).toBe("L0");
+    });
+
+    it("lets the model pick the lane for a rule without one, and falls back to L1", async () => {
+      const picked = await setup([{ id: "gadgets", configuration: { description: "No gadgets" } }], "L0", [
+        { rule: "gadgets", applies: 0.9, lane: "L3" },
+      ]);
+      expect((await picked.service.decide("user-1", cart)).lane).toBe("L3");
+
+      const unpicked = await setup([{ id: "gadgets", configuration: { description: "No gadgets" } }], "L4", [
+        { rule: "gadgets", applies: 0.9 },
+      ]);
+      expect((await unpicked.service.decide("user-1", cart)).lane).toBe("L1");
+    });
+
+    it("uses the model's own pick when no rule matched", async () => {
+      const { service } = await setup([{ id: "clothes", configuration: { description: "No clothes", lane: "L4" } }], "L2", [
+        { rule: "clothes", applies: 0.1 },
+      ]);
+
+      const verdict = await service.decide("user-1", cart);
+
+      expect(verdict.lane).toBe("L2");
+      expect(verdict.context?.matched_rules).toEqual([]);
+      expect(verdict.context?.decisive_factors).toContainEqual({ code: "model.escalation", source: "model", lane: "L2" });
+    });
+
+    it("takes the strictest of the matched rules and budgets", async () => {
+      const { service } = await setup(
+        [
+          { id: "clothes", configuration: { description: "No clothes", lane: "L1" } },
+          { id: "total", rule_type: "cart_total", configuration: { threshold_minor: 500, lane: "L2" } },
+        ],
+        "L0",
+        [{ rule: "clothes", applies: 0.9 }],
+        // The 1,000 cart takes this budget over its limit: L4.
+        900,
+      );
+
+      const verdict = await service.decide("user-1", cart);
+
+      expect(verdict.lane).toBe("L4");
+      expect(verdict.context?.decisive_factors.map((factor) => factor.code).sort()).toEqual(
+        ["budget.exceeded", "rule.cart_total", "rule.description"].sort(),
+      );
+    });
+
+    it("fails open when the model fails: a free-text rule can't match", async () => {
+      const { service, evaluate } = await setup([{ id: "clothes", configuration: { description: "No clothes", lane: "L4" } }], "L4", "fails");
+
+      const verdict = await service.decide("user-1", cart);
+
+      expect(evaluate).toHaveBeenCalledOnce();
+      expect(verdict).toMatchObject({ lane: "L0", action: "allow" });
+      expect(verdict.context?.decisive_factors).toEqual([{ code: "no_policy_match", source: "policy", lane: "L0" }]);
+    });
+
+    it("never asks the model on a reducing trigger", async () => {
+      const { service, evaluate } = await setup([{ id: "clothes", configuration: { description: "No clothes", lane: "L4" } }], "L4", [
+        { rule: "clothes", applies: 1 },
+      ]);
+
+      const verdict = await service.decide("user-1", cart, {
+        intent: "remove_item",
+        source: "known",
+        page_type: "cart",
+        occurred_at: "2026-11-06T12:00:00.000Z",
+      });
+
+      expect(verdict.lane).toBe("L0");
+      expect(evaluate).not.toHaveBeenCalled();
+    });
+  });
+
   describe("decision context (AUX-32)", () => {
     it.each([
       ["0", "L0"],

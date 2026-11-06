@@ -2,7 +2,9 @@ import {
   ActivePassQuerySchema,
   CreateRuleSchema,
   DecisionContextSchema,
+  DecisionReasonCodeSchema,
   ReadFailureCodeSchema,
+  RULE_DESCRIPTION_MAX_LENGTH,
   ReadFailureReportSchema,
   UpdateRuleSchema,
   VerdictSchema,
@@ -37,6 +39,16 @@ describe("rule contracts", () => {
     });
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues.every((issue) => issue.path[0] === "configuration")).toBe(true);
+  });
+
+  it("accepts a free-text rule with or without a lane (AUX-50)", () => {
+    const base = { name: "No clothes", rule_type: "description", enabled: true };
+    expect(CreateRuleSchema.safeParse({ ...base, configuration: { description: "I don't want to buy clothes", lane: "L0" } }).success).toBe(true);
+    expect(CreateRuleSchema.safeParse({ ...base, configuration: { description: "I don't want to buy clothes" } }).success).toBe(true);
+    expect(CreateRuleSchema.safeParse({ ...base, configuration: { description: "  " } }).success).toBe(false);
+    expect(CreateRuleSchema.safeParse({ ...base, configuration: { description: "x".repeat(RULE_DESCRIPTION_MAX_LENGTH + 1) } }).success).toBe(false);
+    expect(CreateRuleSchema.safeParse({ ...base, configuration: { description: "Clothes", keywords: ["shirt"] } }).success).toBe(false);
+    expect(DecisionReasonCodeSchema.safeParse("rule.description").success).toBe(true);
   });
 
   it("doesn't let an update change a rule's type", () => {
