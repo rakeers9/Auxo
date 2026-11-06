@@ -114,7 +114,7 @@ function sessionStorageOrNull(): Storage | null {
 export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapter): Promise<void> {
   let ui: ShadowRootContentScriptUi<OverlayHandle | null> | null = null;
   let hintUi: ShadowRootContentScriptUi<OverlayHandle> | null = null;
-  // Stops known buy clicks when this page's answer is "block" (always with WXT_FORCE_BLOCK=1 in dev).
+  // Stops known buy clicks when this page's answer is "pause" or "block" (always with WXT_FORCE_BLOCK=1 in dev).
   const gate = createClickGate({ enabled: ENFORCE, alwaysOn: FORCE_BLOCK, devVerdict: DEV_VERDICT });
   // Carts the user continued past, kept across this tab's pages.
   const carry = createOverrideCarry(sessionStorageOrNull());

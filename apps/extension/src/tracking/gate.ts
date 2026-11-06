@@ -41,7 +41,8 @@ export interface ClickGateOptions {
 // Never replays a click: a blocked click is simply stopped, and after the
 // user continues past the pause, their own next click goes through. Only
 // known store buttons are gated (never guesses), and only when the page's
-// answer is "block" (or always, in dev builds).
+// answer is "pause" or "block" (or always, in dev builds). A pause stops the
+// click too, so a fast click can't skip the wait the pause asks for.
 export function createClickGate(options: ClickGateOptions): ClickGate {
   const enabled = options.enabled ?? true;
   let current: Verdict | null = null;
@@ -59,7 +60,7 @@ export function createClickGate(options: ClickGateOptions): ClickGate {
 
       const verdict = current ?? (options.alwaysOn ? options.devVerdict : null);
       if (!verdict || (overridden.get(verdict.decision_id) ?? 0) > Date.now()) return { block: false };
-      if (options.alwaysOn || verdict.action === "block") {
+      if (options.alwaysOn || verdict.action !== "allow") {
         return { block: true, verdict, synthetic: verdict === options.devVerdict };
       }
       return { block: false };

@@ -420,9 +420,18 @@ describe("blocking a purchase on the real checkout page", () => {
     t.stop();
   });
 
-  it("pause and allow answers never stop the click", async () => {
+  it("a pause answer stops the click too", async () => {
     const t = await checkoutWithGate();
     t.gate.setVerdict({ ...verdict, lane: "L2", action: "pause" });
+
+    expect(t.click().defaultPrevented).toBe(true);
+    expect(t.placeOrder).not.toHaveBeenCalled();
+    t.stop();
+  });
+
+  it("allow answers never stop the click", async () => {
+    const t = await checkoutWithGate();
+    t.gate.setVerdict({ ...verdict, lane: "L1", action: "allow" });
 
     expect(t.click().defaultPrevented).toBe(false);
     expect(t.placeOrder).toHaveBeenCalledTimes(1);
