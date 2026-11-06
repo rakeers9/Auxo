@@ -172,19 +172,61 @@ describe("renderSettings", () => {
     expect(total).toEqual(["L0", "L1", "L2", "L3", "L4"]);
   });
 
-  it("adds a spending limit for this month by default", async () => {
+  it("adds a spending limit for this month by default, then clears the calendar", async () => {
     const transport = fakeTransport();
     renderSettings(root, transport, { now: () => NOW });
     await flush();
 
+    expect(form("budget").querySelector('[data-role="budget-calendar"]')).not.toBeNull();
     fill(form("budget"), "amount", "300");
     submitForm(form("budget"));
     await flush();
 
     expect(transport.send).toHaveBeenLastCalledWith({
       op: "create-budget",
-      budget: { currency: "USD", limit_minor: 30_000, period_start: "2026-11-01", period_end: "2026-11-30" },
+      budget: { currency: "USD", limit_minor: 30_000, period_start: "2026-11-01", period_end: "2026-11-30", repeats: false },
     });
+    expect(form("budget").querySelector<HTMLInputElement>('[name="amount"]')?.value).toBe("");
+
+    // After reset() the range is empty, so a second limit needs new days.
+    fill(form("budget"), "amount", "100");
+    submitForm(form("budget"));
+    await flush();
+    expect(transport.send).toHaveBeenCalledTimes(2);
+    expect(status()).toBe("Pick the first and last day on the calendar.");
+  });
+
+  it("sends repeats when the calendar's Repeat box is ticked", async () => {
+    const transport = fakeTransport();
+    renderSettings(root, transport, { now: () => NOW });
+    await flush();
+
+    const repeat = form("budget").querySelector<HTMLInputElement>('[name="repeats"]')!;
+    repeat.click();
+    fill(form("budget"), "amount", "50");
+    submitForm(form("budget"));
+    await flush();
+
+    expect(transport.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ op: "create-budget", budget: expect.objectContaining({ repeats: true }) }),
+    );
+  });
+
+  it("shows a repeating limit and turns its repeat off", async () => {
+    const transport = fakeTransport([], [{ ...BUDGET, repeats: true, period_start: "2026-11-01", period_end: "2026-11-07", period_days: 7 }]);
+    renderSettings(root, transport, { now: () => NOW });
+    await flush();
+
+    const [limit] = items("budgets");
+    expect(limit?.textContent).toContain("$50.00 of $300.00 spent this cycle, Nov 1 to Nov 7, repeats every week");
+    const repeat = limit!.querySelector<HTMLInputElement>('[data-action="repeat"]')!;
+    expect(repeat.checked).toBe(true);
+    repeat.checked = false;
+    repeat.dispatchEvent(new Event("change"));
+    await flush();
+
+    expect(transport.send).toHaveBeenLastCalledWith({ op: "update-budget", id: BUDGET.id, update: { repeats: false } });
+    expect(status()).toBe("This limit ends after the current cycle.");
   });
 
   it("adds cart total and store rules", async () => {

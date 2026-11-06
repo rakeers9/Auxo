@@ -1,5 +1,6 @@
 import { RULE_DESCRIPTION_MAX_LENGTH, type Budget, type Lane, type Rule } from "@auxo/shared";
 
+import { renderBudgetCalendar } from "./budget-calendar";
 import type { SettingsRequest, SettingsResult } from "./client";
 import {
   AUTO_LANE,
@@ -77,22 +78,15 @@ export function renderSettings(
   rulesSection.append(rulesList);
 
   const budgetSection = section(doc, "Spending limit",
-    "When a cart would take you past 75% of a limit, Auxo pauses it. Past 90% or over the limit, it blocks it for a while.");
-  const budgetForm = el(doc, "form", "auxo-form") as HTMLFormElement;
+    "Pick the days on the calendar. Turn on Repeat to start the same number of days again when they end, with spending back at $0. When a cart would take you past 75% of a limit, Auxo pauses it. Past 90% or over the limit, it blocks it for a while.");
+  const budgetForm = el(doc, "form", "auxo-form auxo-budget-form") as HTMLFormElement;
   budgetForm.dataset.form = "budget";
   const range = monthRange(now());
   const amount = input(doc, "amount", "text", "e.g. 300");
   amount.inputMode = "decimal";
-  const start = input(doc, "start", "date");
-  start.value = range.start;
-  const end = input(doc, "end", "date");
-  end.value = range.end;
-  budgetForm.append(
-    labelled(doc, "Limit ($)", amount),
-    labelled(doc, "From", start),
-    labelled(doc, "To", end),
-    submit(doc, "Add limit"),
-  );
+  const calendarSlot = el(doc, "div", "auxo-calendar-slot");
+  const calendar = renderBudgetCalendar(calendarSlot, { start: range.start, end: range.end, now });
+  budgetForm.append(labelled(doc, "Limit ($)", amount), calendarSlot, submit(doc, "Add limit"));
   const budgetsList = el(doc, "ul", "auxo-list");
   budgetsList.dataset.list = "budgets";
   budgetSection.append(budgetForm, budgetsList);
@@ -179,10 +173,22 @@ export function renderSettings(
   const drawBudget = (budget: Budget): HTMLElement => {
     const item = el(doc, "li", "auxo-item");
     item.dataset.id = budget.id;
+    const summary = budgetSummary(budget, now().getFullYear());
+    // Turning Repeat off ends the limit after its current cycle.
+    const repeats = doc.createElement("input");
+    repeats.type = "checkbox";
+    repeats.checked = budget.repeats;
+    repeats.dataset.action = "repeat";
+    repeats.addEventListener("change", () => {
+      void run(
+        { op: "update-budget", id: budget.id, update: { repeats: repeats.checked } },
+        repeats.checked ? "This limit now repeats." : "This limit ends after the current cycle.",
+      );
+    });
     const remove = button(doc, "Delete", "delete");
-    remove.setAttribute("aria-label", `Delete the limit ${budgetSummary(budget)}`);
+    remove.setAttribute("aria-label", `Delete the limit ${summary}`);
     remove.addEventListener("click", () => void run({ op: "delete-budget", id: budget.id }, "Deleted."));
-    item.append(el(doc, "span", "auxo-summary", budgetSummary(budget)), remove);
+    item.append(el(doc, "span", "auxo-summary", summary), labelled(doc, "Repeat", repeats), remove);
     return item;
   };
 
@@ -207,10 +213,13 @@ export function renderSettings(
     description.value = "";
   });
   onSubmit(budgetForm, () => {
-    const budget = budgetFrom(amount.value, start.value, end.value);
-    return budget ? { op: "create-budget", budget } : "Enter a limit in dollars, and a To date on or after the From date.";
+    const picked = calendar.value();
+    if (picked.start === "" || picked.end === null) return "Pick the first and last day on the calendar.";
+    const budget = budgetFrom(amount.value, picked.start, picked.end, picked.repeats);
+    return budget ? { op: "create-budget", budget } : "Enter a limit in dollars, like 300.";
   }, () => {
     amount.value = "";
+    calendar.reset();
   });
   onSubmit(totalForm, () => {
     const rule = isLane(totalLane.value) ? cartTotalRule(total.value, totalLane.value) : null;

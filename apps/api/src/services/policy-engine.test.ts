@@ -42,6 +42,8 @@ function budget(overrides: Partial<Budget> = {}): Budget {
     spent_minor: 0,
     period_start: "2026-10-01",
     period_end: "2026-10-31",
+    period_days: 31,
+    repeats: false,
     created_at: now.toISOString(),
     updated_at: now.toISOString(),
     ...overrides,
