@@ -39,6 +39,7 @@ import { createMiniCartHandler } from "../tracking/minicart-handler";
 import type { MiniCartDiff } from "../tracking/sidesheet";
 import { createPendingStore } from "../tracking/pending";
 import { confirmPurchase } from "../tracking/purchase";
+import { createOverrideCarry } from "../tracking/override-carry";
 import { createTracker } from "../tracking/tracker";
 import { handleOverlayExit, type ExitDeps, type PassMessage, type PassReply } from "./exit";
 
@@ -115,6 +116,8 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   let hintUi: ShadowRootContentScriptUi<OverlayHandle> | null = null;
   // Stops known buy clicks when this page's answer is "block" (always with WXT_FORCE_BLOCK=1 in dev).
   const gate = createClickGate({ enabled: ENFORCE, alwaysOn: FORCE_BLOCK, devVerdict: DEV_VERDICT });
+  // Carts the user continued past, kept across this tab's pages.
+  const carry = createOverrideCarry(sessionStorageOrNull());
   let debugUi: ShadowRootContentScriptUi<DebugPanel> | null = null;
 
   // What the debug panel shows, kept between checks.
@@ -199,7 +202,10 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     requestPass: (decisionId) =>
       browser.runtime.sendMessage<PassMessage, PassReply | undefined>({ type: "auxo:pass", decisionId }),
     close: removeOverlay,
-    override: (decisionId, expiresAt) => gate.override(decisionId, expiresAt),
+    override: (decisionId, expiresAt) => {
+      gate.override(decisionId, expiresAt);
+      carry.overrode(decisionId, expiresAt);
+    },
     saveForLater,
     sendEvent,
     note: (text) => {
@@ -272,6 +278,8 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     // cart doesn't re-open a pause the user already answered. A place-order
     // click that got this far already passed the click gate.
     if (trigger && (REDUCING.has(trigger.intent) || trigger.same_cart || trigger.intent === "place_order")) return;
+    // The user already continued past this cart, maybe on an earlier page.
+    if (carry.covers(verdict.decision_id)) return;
 
     const next = await createShadowRootUi(ctx, {
       name: "auxo-overlay",
@@ -347,6 +355,14 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     const result = await browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart, trigger: t });
     // This page got its answer, so the worker shouldn't hand it to the next page.
     if (result.ok) {
+      // Runs before the answer is shown or reaches the gate. A cart the user
+      // already continued past isn't paused or blocked again (AUX-37).
+      const id = result.verdict.decision_id;
+      const until = carry.decided(id, { merchant: cart.merchant, cartHash: cart.cart_hash }, t);
+      if (until !== undefined) {
+        gate.override(id, until);
+        note = `already continued past this cart; not paused again until ${new Date(until).toLocaleTimeString()}`;
+      }
       void browser.runtime
         .sendMessage<AckMessage>({ type: "auxo:ack", decisionId: result.verdict.decision_id })
         .catch(() => {});

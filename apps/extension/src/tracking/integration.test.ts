@@ -387,6 +387,36 @@ describe("blocking a purchase on the real checkout page", () => {
     t.stop();
   });
 
+  // AUX-37: every decide gets a fresh decision_id, so Continue on the cart page
+  // used to be forgotten at checkout and the same cart was blocked again.
+  it("Continue on the cart page carries to checkout for the same cart", async () => {
+    const { createOverrideCarry } = await import("./override-carry");
+    const t = await checkoutWithGate();
+    const draft = inspectAmazonPage(document, new URL("https://www.amazon.com/checkout/p/p-X/spc")).draft!;
+    const cart = { merchant: draft.merchant, cartHash: await hashCart(draft) };
+    const expiresAt = Date.now() + 10 * 60_000;
+
+    // The cart page: a block for this cart, and the user chose Go anyway.
+    const cartDecision = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const cartPage = createOverrideCarry(sessionStorage);
+    cartPage.decided(cartDecision, cart, { intent: "page_view", source: "page", page_type: "cart", occurred_at: new Date().toISOString() });
+    cartPage.overrode(cartDecision, expiresAt);
+
+    // The checkout page: the same cart gets a new decision, wired as the content script does.
+    const checkoutPage = createOverrideCarry(sessionStorage);
+    const checkoutDecision = { ...verdict, lane: "L3" as const, action: "block" as const };
+    const covered = checkoutPage.decided(checkoutDecision.decision_id, cart, {
+      intent: "checkout", source: "known", page_type: "checkout", occurred_at: new Date().toISOString(),
+    });
+    if (covered !== undefined) t.gate.override(checkoutDecision.decision_id, covered);
+    t.gate.setVerdict(checkoutDecision);
+
+    expect(checkoutPage.covers(checkoutDecision.decision_id)).toBe(true); // no new block screen
+    expect(t.click().defaultPrevented).toBe(false);
+    expect(t.placeOrder).toHaveBeenCalledTimes(1);
+    t.stop();
+  });
+
   it("pause and allow answers never stop the click", async () => {
     const t = await checkoutWithGate();
     t.gate.setVerdict({ ...verdict, lane: "L2", action: "pause" });
