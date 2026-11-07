@@ -259,8 +259,8 @@ describe("DecisionService", () => {
       return { service, ids, evaluate };
     }
 
-    it("uses a matched rule's lane, not the model's own pick", async () => {
-      const { service, ids } = await setup([{ id: "clothes", configuration: { description: "No clothes", lane: "L2" } }], "L4", [
+    it("uses a matched rule's lane when the model asks for less", async () => {
+      const { service, ids } = await setup([{ id: "clothes", configuration: { description: "No clothes", lane: "L2" } }], "L1", [
         { rule: "clothes", applies: 0.9 },
       ]);
 
@@ -270,6 +270,32 @@ describe("DecisionService", () => {
       expect(verdict.context?.matched_rules).toEqual([{ rule_id: ids.get("clothes"), name: "clothes", rule_type: "description", lane: "L2" }]);
       expect(verdict.context?.decisive_factors).toEqual([{ code: "rule.description", source: "rule", lane: "L2" }]);
       expect(DecisionContextSchema.safeParse(verdict.context).success).toBe(true);
+    });
+
+    it("lets the model raise the lane above a matched rule, and says so", async () => {
+      const { service } = await setup([{ id: "clothes", configuration: { description: "No clothes", lane: "L2" } }], "L4", [
+        { rule: "clothes", applies: 0.9 },
+      ]);
+
+      const verdict = await service.decide("user-1", cart);
+
+      expect(verdict).toMatchObject({ lane: "L4", action: "block" });
+      expect(verdict.context?.decisive_factors).toEqual([
+        { code: "rule.description", source: "rule", lane: "L2" },
+        { code: "model.escalation", source: "model", lane: "L4" },
+      ]);
+    });
+
+    it("still applies a stricter budget next to a matched L0 rule, but the model can't raise it", async () => {
+      // The 1,000 cart takes the 1,200 budget past 75%: L2.
+      const { service } = await setup([{ id: "groceries", configuration: { description: "Groceries are fine", lane: "L0" } }], "L4", [
+        { rule: "groceries", applies: 0.95 },
+      ], 1_200);
+
+      const verdict = await service.decide("user-1", cart);
+
+      expect(verdict.lane).toBe("L2");
+      expect(verdict.context?.decisive_factors.map((factor) => factor.code)).not.toContain("model.escalation");
     });
 
     it("keeps a matched L0 rule even when the model would add friction", async () => {
@@ -286,7 +312,7 @@ describe("DecisionService", () => {
       ]);
       expect((await picked.service.decide("user-1", cart)).lane).toBe("L3");
 
-      const unpicked = await setup([{ id: "gadgets", configuration: { description: "No gadgets" } }], "L4", [
+      const unpicked = await setup([{ id: "gadgets", configuration: { description: "No gadgets" } }], "L0", [
         { rule: "gadgets", applies: 0.9 },
       ]);
       expect((await unpicked.service.decide("user-1", cart)).lane).toBe("L1");
@@ -613,6 +639,47 @@ describe("DecisionService", () => {
       expect(verdict.lane).toBe("L0");
       expect(repository.merchantHistory).not.toHaveBeenCalled();
       expect(verdict.context).not.toHaveProperty("history");
+    });
+  });
+
+  describe("local time and the model's signals", () => {
+    function service(evaluate: DecisionModelProvider["evaluate"]) {
+      return new DecisionService({
+        repository: new InMemoryDecisionRepository(),
+        decisionModelProvider: { modelVersion: "clef-test", evaluate },
+        ttlSeconds: 60,
+        // 01:40 on Saturday in New York.
+        now: () => new Date("2026-11-07T06:40:00.000Z"),
+      });
+    }
+    const answer = {
+      lane: "L2" as const,
+      confidence: 0.7,
+      probabilities: { L0: 0.05, L1: 0.1, L2: 0.7, L3: 0.1, L4: 0.05 },
+      model: "clef-test",
+      signals: { impulse: 0.88, want: 0.95 },
+    };
+
+    it("gives the model and the context the user's local time and the trigger", async () => {
+      const evaluate = vi.fn<DecisionModelProvider["evaluate"]>(async () => answer);
+      const trigger: Trigger = { intent: "checkout", source: "known", page_type: "cart", occurred_at: "2026-11-07T06:39:58.000Z" };
+
+      const verdict = await service(evaluate).decide("user-1", cart, trigger, "America/New_York");
+
+      const moment = { time_zone: "America/New_York", local_time: "01:40", weekday: "saturday", part_of_day: "night" };
+      expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ moment, trigger });
+      expect(verdict.context?.moment).toEqual(moment);
+      expect(verdict.context?.model_signal?.signals).toEqual({ impulse: 0.88, want: 0.95 });
+      expect(DecisionContextSchema.safeParse(verdict.context).success).toBe(true);
+    });
+
+    it("leaves the local time out when no time zone was sent", async () => {
+      const evaluate = vi.fn<DecisionModelProvider["evaluate"]>(async () => answer);
+
+      const verdict = await service(evaluate).decide("user-1", cart);
+
+      expect(evaluate.mock.calls[0]?.[0]).not.toHaveProperty("moment");
+      expect(verdict.context).not.toHaveProperty("moment");
     });
   });
 });

@@ -29,19 +29,20 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("decide", () => {
   it("posts the cart to /v1/decide and returns the verdict", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(verdict));
 
-    const result = await decide(cart, { baseUrl: "http://127.0.0.1:3001", fetch: fetchMock });
+    const result = await decide(cart, { baseUrl: "http://127.0.0.1:3001", fetch: fetchMock, timeZone: "America/Chicago" });
 
     expect(result).toEqual({ ok: true, verdict });
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toBe("http://127.0.0.1:3001/v1/decide");
     expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toEqual({ cart });
+    expect(JSON.parse(String(init?.body))).toEqual({ cart, time_zone: "America/Chicago" });
   });
 
   it("sends the trigger with the cart when given", async () => {
@@ -53,9 +54,29 @@ describe("decide", () => {
       occurred_at: "2026-10-04T20:00:00.000Z",
     };
 
-    await decide(cart, { baseUrl: "http://x", fetch: fetchMock }, trigger);
+    await decide(cart, { baseUrl: "http://x", fetch: fetchMock, timeZone: "America/Chicago" }, trigger);
 
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ cart, trigger });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ cart, trigger, time_zone: "America/Chicago" });
+  });
+
+  it("sends the browser's time zone by default", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(verdict));
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+      ...new Intl.DateTimeFormat().resolvedOptions(),
+      timeZone: "Asia/Kolkata",
+    });
+
+    await decide(cart, { baseUrl: "http://x", fetch: fetchMock });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ cart, time_zone: "Asia/Kolkata" });
+  });
+
+  it("leaves out a time zone the API wouldn't accept", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(verdict));
+
+    await decide(cart, { baseUrl: "http://x", fetch: fetchMock, timeZone: "Mars/Olympus_Mons" });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ cart });
   });
 
   it("fails open with 'http' on a non-2xx status", async () => {

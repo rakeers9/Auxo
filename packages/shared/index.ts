@@ -6,6 +6,7 @@ export * from "./check-ins.js";
 export * from "./decision-context.js";
 export * from "./events.js";
 export * from "./lane.js";
+export * from "./moment.js";
 export * from "./passes.js";
 export * from "./read-failures.js";
 export * from "./rules.js";

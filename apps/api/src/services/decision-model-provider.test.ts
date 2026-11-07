@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { Cart, DecisionHistory, Rule } from "@auxo/shared";
+import type { Cart, DecisionHistory, DecisionMoment, Rule, Trigger } from "@auxo/shared";
 import { CloudflareClefProvider, MAX_DESCRIPTION_RULES_PER_REQUEST } from "./decision-model-provider.js";
 
 const cart: Cart = {
@@ -172,6 +172,8 @@ describe("CloudflareClefProvider free-text rules (AUX-50)", () => {
     const questions = sentQuestions(request);
     expect(Object.keys(questions).sort()).toEqual([
       "intervention_lane",
+      "signal.impulse",
+      "signal.want",
       `rule.${withLane.id}.applies`,
       `rule.${withoutLane.id}.applies`,
       `rule.${withoutLane.id}.lane`,
@@ -240,7 +242,7 @@ describe("CloudflareClefProvider free-text rules (AUX-50)", () => {
     await provider.evaluate({ cart, rules: [disabled, broken, ...many], budgets: [], deterministicLane: "L0" });
 
     const questions = sentQuestions(request);
-    expect(Object.keys(questions)).toHaveLength(1 + 2 * MAX_DESCRIPTION_RULES_PER_REQUEST);
+    expect(Object.keys(questions)).toHaveLength(3 + 2 * MAX_DESCRIPTION_RULES_PER_REQUEST);
     expect(Object.keys(questions).length).toBeLessThanOrEqual(64);
     expect(questions[`rule.${disabled.id}.applies`]).toBeUndefined();
     expect(questions[`rule.${broken.id}.applies`]).toBeUndefined();
@@ -250,5 +252,85 @@ describe("CloudflareClefProvider free-text rules (AUX-50)", () => {
     const provider = new CloudflareClefProvider({ accountId: "a", apiToken: "t", fetch: clef({}) });
     const signal = await provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0" });
     expect(signal).not.toHaveProperty("rules");
+  });
+});
+
+describe("CloudflareClefProvider moment, trigger, and signals", () => {
+  const laneAnswer = {
+    type: "choice",
+    choice: "L2",
+    confidence: 0.7,
+    probabilities: { L0: 0.05, L1: 0.1, L2: 0.7, L3: 0.1, L4: 0.05 },
+  };
+  function clef(answers: Record<string, unknown>) {
+    return vi.fn(async () =>
+      new Response(JSON.stringify({ result: { model: "clef", answers: { intervention_lane: laneAnswer, ...answers } } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }
+  function sentBody(request: ReturnType<typeof clef>) {
+    const [, init] = (request.mock.calls[0] ?? []) as unknown as [string, RequestInit];
+    return JSON.parse(String(init.body)) as {
+      state: Record<string, unknown>;
+      questions: Record<string, { type: string; instructions: unknown }>;
+    };
+  }
+  const moment: DecisionMoment = { time_zone: "America/New_York", local_time: "01:40", weekday: "saturday", part_of_day: "night" };
+  const trigger: Trigger = { intent: "place_order", source: "known", page_type: "checkout", occurred_at: "2026-11-07T06:40:00.000Z", label: "Place your order" };
+
+  it("sends the user's local time and what they clicked, without the trigger's label or timestamp", async () => {
+    const request = clef({});
+    const provider = new CloudflareClefProvider({ accountId: "a", apiToken: "t", fetch: request });
+
+    await provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0", moment, trigger });
+
+    const body = sentBody(request);
+    expect(body.state.moment).toEqual(moment);
+    expect(body.state.trigger).toEqual({ intent: "place_order", page_type: "checkout" });
+  });
+
+  it("sends null moment and trigger for older clients", async () => {
+    const request = clef({});
+    const provider = new CloudflareClefProvider({ accountId: "a", apiToken: "t", fetch: request });
+
+    await provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0" });
+
+    expect(sentBody(request).state).toMatchObject({ moment: null, trigger: null });
+  });
+
+  it("asks the impulse and want questions in the same request and returns their answers", async () => {
+    const request = clef({
+      "signal.impulse": { type: "noul", noul: 0.86 },
+      "signal.want": { type: "noul", noul: 0.93 },
+    });
+    const provider = new CloudflareClefProvider({ accountId: "a", apiToken: "t", fetch: request });
+
+    const signal = await provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0", moment, trigger });
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(sentBody(request).questions["signal.impulse"]?.type).toBe("noul");
+    expect(sentBody(request).questions["signal.want"]?.type).toBe("noul");
+    expect(signal.signals).toEqual({ impulse: 0.86, want: 0.93 });
+  });
+
+  it("leaves out a missing or malformed signal without failing the decision", async () => {
+    const provider = new CloudflareClefProvider({
+      accountId: "a",
+      apiToken: "t",
+      fetch: clef({ "signal.impulse": { type: "noul", noul: 4 }, "signal.want": { type: "noul", noul: 0.2 } }),
+    });
+    const partial = await provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0" });
+    expect(partial).toMatchObject({ lane: "L2", signals: { want: 0.2 } });
+    expect(partial.signals).not.toHaveProperty("impulse");
+
+    const none = await new CloudflareClefProvider({ accountId: "a", apiToken: "t", fetch: clef({}) }).evaluate({
+      cart,
+      rules: [],
+      budgets: [],
+      deterministicLane: "L0",
+    });
+    expect(none).not.toHaveProperty("signals");
   });
 });
