@@ -228,7 +228,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       });
     }
 
-    const verdict = await decisionService.decide(user.id, parsed.data.cart, parsed.data.trigger);
+    const verdict = await decisionService.decide(user.id, parsed.data.cart, parsed.data.trigger, parsed.data.time_zone);
     return reply.status(200).send(verdict);
   });
 

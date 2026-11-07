@@ -85,9 +85,8 @@ describe("POST /v1/decide with a trigger", () => {
       payload: { cart: cartWithHashSuffix("0"), trigger: trigger("add_to_cart") },
     });
 
-    // The matched rule's L3, not the model's L4: a lane the user set wins
-    // over the model's own pick (AUX-50).
-    expect(response.json()).toMatchObject({ lane: "L3", action: "block" });
+    // The matched rule's L3 is the floor and the model raises it to L4.
+    expect(response.json()).toMatchObject({ lane: "L4", action: "block" });
     expect(evaluate).toHaveBeenCalledOnce();
   });
 
@@ -100,5 +99,37 @@ describe("POST /v1/decide with a trigger", () => {
     expect(DecideResponseSchema.safeParse(body).success).toBe(true);
     expect(body.lane).toBe("L3");
     expect(body.context.decisive_factors).toEqual([{ code: "stub.hash", source: "policy", lane: "L3" }]);
+  });
+});
+
+describe("POST /v1/decide with a time zone", () => {
+  it("returns the user's local time in the context", async () => {
+    const app = buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("0"), time_zone: "Europe/London" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(DecideResponseSchema.safeParse(body).success).toBe(true);
+    expect(body.context.moment).toMatchObject({ time_zone: "Europe/London", local_time: expect.stringMatching(/^\d\d:\d\d$/) });
+  });
+
+  it("rejects a time zone that doesn't exist", async () => {
+    const app = buildApp();
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/decide",
+      payload: { cart: cartWithHashSuffix("0"), time_zone: "Mars/Olympus_Mons" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("INVALID_REQUEST");
   });
 });

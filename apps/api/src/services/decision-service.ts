@@ -7,6 +7,7 @@ import {
   type DecideResponse,
   type DecisionContext,
   type DecisionHistory,
+  type DecisionMoment,
   type Rule,
   type Trigger,
   type TriggerIntent,
@@ -25,6 +26,7 @@ import {
   policyVersion,
   type PolicyEvaluation,
 } from "./policy-engine.js";
+import { describeMoment } from "./moment.js";
 import { stubLane } from "./stub-decision.js";
 
 export const STUB_POLICY_VERSION = "stub-v1";
@@ -84,9 +86,12 @@ export class DecisionService {
 
   // Every request is analyzed fresh and gets its own decision_id; past
   // decisions are never reused, so the same cart can get a different answer.
-  public async decide(userId: string, cart: Cart, trigger?: Trigger): Promise<DecideResponse> {
+  // timeZone is the browser's IANA zone, already validated by the request
+  // schema; it gives the model and the context the user's local time.
+  public async decide(userId: string, cart: Cart, trigger?: Trigger, timeZone?: string): Promise<DecideResponse> {
     const now = this.now();
     const reducing = isReducingTrigger(trigger);
+    const moment = timeZone ? describeMoment(now, timeZone) : null;
     // Started before the settings are read so the two run concurrently. A
     // reducing trigger always gets L0, so its history isn't needed.
     const historyPromise = reducing ? Promise.resolve(null) : this.loadHistory(userId, cart, now);
@@ -118,7 +123,17 @@ export class DecisionService {
       };
     } else if (hasPolicyData || this.options.decisionModelProvider) {
       const history = await historyPromise;
-      outcome = await this.decideWithPolicyAndModel(decisionId, cart, rules, budgets, history, hasPolicyData, baseVersion, policyEvaluation);
+      outcome = await this.decideWithPolicyAndModel(decisionId, {
+        cart,
+        rules,
+        budgets,
+        history,
+        moment,
+        trigger,
+        hasPolicyData,
+        baseVersion,
+        evaluation: policyEvaluation,
+      });
     } else {
       // No rules, no budgets, no model: the stub picks the lane from cart_hash,
       // so it is the decisive factor whatever lane it picked (L0 included).
@@ -137,7 +152,7 @@ export class DecisionService {
 
     const expiresAt = new Date(now.getTime() + this.options.ttlSeconds * 1_000);
     const history = await historyPromise;
-    const context = createDecisionContext(outcome, cart, budgets, now, outcome.evaluation ?? policyEvaluation, history);
+    const context = createDecisionContext(outcome, cart, budgets, now, outcome.evaluation ?? policyEvaluation, history, moment);
 
     await this.options.repository.save({
       userId,
@@ -181,16 +196,8 @@ export class DecisionService {
     }
   }
 
-  private async decideWithPolicyAndModel(
-    decisionId: string,
-    cart: Cart,
-    rules: Rule[],
-    budgets: Budget[],
-    history: DecisionHistory | null,
-    hasPolicyData: boolean,
-    baseVersion: string,
-    evaluation: PolicyEvaluation,
-  ): Promise<Outcome> {
+  private async decideWithPolicyAndModel(decisionId: string, input: ModelDecisionInput): Promise<Outcome> {
+    const { cart, rules, budgets, history, moment, trigger, hasPolicyData, baseVersion, evaluation } = input;
     // With no rules or budgets the engine matches nothing, so its lane is L0.
     const deterministicLane = evaluation.lane;
     const provider = this.options.decisionModelProvider;
@@ -198,29 +205,40 @@ export class DecisionService {
 
     if (provider) {
       try {
-        modelSignal = await provider.evaluate({ cart, rules, budgets, deterministicLane, ...(history ? { history } : {}) });
+        modelSignal = await provider.evaluate({
+          cart,
+          rules,
+          budgets,
+          deterministicLane,
+          ...(history ? { history } : {}),
+          ...(moment ? { moment } : {}),
+          ...(trigger ? { trigger } : {}),
+        });
       } catch (error) {
         this.options.onDecisionModelError?.(error);
       }
     }
 
-    // AUX-50: what the user set up decides the lane. Their rules and budgets
-    // (free-text rules as judged by the model) give lanes, and the strictest
-    // wins. The model's own lane pick only counts when none of them matched,
-    // so a matched rule's lane (L0 included) is never overridden by it.
+    // What the user set up is the floor. Their rules and budgets (free-text
+    // rules as judged by the model) give lanes and the strictest wins (AUX-50).
+    // The model can raise the lane above that floor, never lower it, except
+    // that a matched rule asking for L0 is the user saying "let this through":
+    // then the model can't add friction (code still applies any stricter rule
+    // or budget that matched alongside it).
     const userFactors = [
       ...evaluation.factors.filter((factor) => factor.source !== "policy"),
       ...evaluateDescriptionRules(rules, modelSignal?.rules ?? []),
     ];
     const userLane = userFactors.reduce((lane, factor) => maxLane(lane, factor.lane), deterministicLane);
-    const lane = userFactors.length === 0 && modelSignal ? maxLane(userLane, modelSignal.lane) : userLane;
+    const userAllowed = userFactors.some((factor) => factor.source === "rule" && factor.lane === "L0");
+    const lane = modelSignal && !userAllowed ? maxLane(userLane, modelSignal.lane) : userLane;
     const finalEvaluation: PolicyEvaluation = userFactors.length > 0 ? { lane: userLane, factors: userFactors } : evaluation;
     const decisiveFactors: DecisiveFactor[] = finalEvaluation.factors.map(({ code, source, lane: factorLane }) => ({
       code,
       source,
       lane: factorLane,
     }));
-    // When the model's own pick set the lane, say so.
+    // When the model raised the lane above what the user's setup asked for, say so.
     if (modelSignal && lane !== userLane) {
       decisiveFactors.push({ code: "model.escalation", source: "model", lane: modelSignal.lane });
     }
@@ -237,6 +255,18 @@ export class DecisionService {
   }
 }
 
+interface ModelDecisionInput {
+  cart: Cart;
+  rules: Rule[];
+  budgets: Budget[];
+  history: DecisionHistory | null;
+  moment: DecisionMoment | null;
+  trigger: Trigger | undefined;
+  hasPolicyData: boolean;
+  baseVersion: string;
+  evaluation: PolicyEvaluation;
+}
+
 function createDecisionContext(
   outcome: Outcome,
   cart: Cart,
@@ -244,6 +274,7 @@ function createDecisionContext(
   now: Date,
   evaluation: PolicyEvaluation,
   history: DecisionHistory | null,
+  moment: DecisionMoment | null,
 ): DecisionContext {
   const { verdict, modelSignal } = outcome;
   const activeBudget = budgets
@@ -270,7 +301,13 @@ function createDecisionContext(
       ? [{ rule_id: factor.rule.id, name: factor.rule.name, rule_type: factor.rule.rule_type, lane: factor.lane }]
       : []),
     model_signal: modelSignal
-      ? { provider: "cloudflare-clef", model: modelSignal.model, suggested_lane: modelSignal.lane, confidence: modelSignal.confidence }
+      ? {
+          provider: "cloudflare-clef",
+          model: modelSignal.model,
+          suggested_lane: modelSignal.lane,
+          confidence: modelSignal.confidence,
+          ...(modelSignal.signals ? { signals: modelSignal.signals } : {}),
+        }
       : null,
     decisive_factors: outcome.decisiveFactors,
     available_actions: verdict.action === "allow"
@@ -279,6 +316,7 @@ function createDecisionContext(
         ? ["leave", "save_for_later", "continue"]
         : ["leave", "save_for_later", "override_after_cooldown"],
     ...(history ? { history } : {}),
+    ...(moment ? { moment } : {}),
   };
 }
 

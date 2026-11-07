@@ -2,11 +2,15 @@ import { z } from "zod";
 
 import { CartSchema } from "./cart.js";
 import { DecisionContextSchema } from "./decision-context.js";
+import { TimeZoneSchema } from "./moment.js";
 import { TriggerSchema } from "./trigger.js";
 import { VerdictSchema } from "./verdict.js";
 
-// trigger is optional so older clients keep working.
-export const DecideRequestSchema = z.object({ cart: CartSchema, trigger: TriggerSchema.optional() }).strict();
+// trigger and time_zone are optional so older clients keep working. time_zone
+// is the browser's IANA zone, so the decision can use the user's local time.
+export const DecideRequestSchema = z
+  .object({ cart: CartSchema, trigger: TriggerSchema.optional(), time_zone: TimeZoneSchema.optional() })
+  .strict();
 export const DecideResponseSchema = VerdictSchema.extend({
   context: DecisionContextSchema,
 }).strict();

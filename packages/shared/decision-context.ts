@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { LaneSchema } from "./lane.js";
+import { DecisionMomentSchema } from "./moment.js";
 import { RuleTypeSchema } from "./rules.js";
 
 export const DecisionReasonCodeSchema = z.enum([
@@ -59,6 +60,14 @@ export const DecisionContextSchema = z
       model: z.string(),
       suggested_lane: LaneSchema,
       confidence: z.number().min(0).max(1),
+      // The model's read of the cart, each the probability it's true. They
+      // explain the decision; code doesn't use them to pick the lane.
+      signals: z.object({
+        // Bought on impulse rather than planned.
+        impulse: z.number().min(0).max(1).optional(),
+        // A discretionary want rather than a need.
+        want: z.number().min(0).max(1).optional(),
+      }).strict().optional(),
     }).strict().nullable(),
     decisive_factors: z.array(z.object({
       code: DecisionReasonCodeSchema,
@@ -68,6 +77,8 @@ export const DecisionContextSchema = z
     available_actions: z.array(z.enum(["continue", "leave", "save_for_later", "override_after_cooldown"])),
     // The user's recent history at this merchant (Phase 4 feedback loop).
     history: DecisionHistorySchema.optional(),
+    // The user's local time when the request names their time zone.
+    moment: DecisionMomentSchema.optional(),
   })
   .strict();
 
