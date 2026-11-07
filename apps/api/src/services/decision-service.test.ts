@@ -5,7 +5,7 @@ import { DecisionContextSchema, type Cart, type DecisionHistory, type Trigger, t
 import { InMemoryDecisionRepository } from "../repositories/decision-repository.js";
 import { InMemorySettingsRepository } from "../repositories/settings-repository.js";
 import type { HistoryRepository } from "../repositories/history-repository.js";
-import { DecisionService, HistoryTimeoutError, modelLaneAtLeast } from "./decision-service.js";
+import { DecisionService, HistoryTimeoutError, modelLaneAtLeast, suggestedAlternative } from "./decision-service.js";
 import type { DecisionModelProvider } from "./decision-model-provider.js";
 
 const cart: Cart = {
@@ -748,5 +748,57 @@ describe("modelLaneAtLeast", () => {
   it("treats a missing lane as zero probability", () => {
     expect(modelLaneAtLeast({ lane: "L3", probabilities: { L3: 0.7 } }, 0.6)).toBe("L3");
     expect(modelLaneAtLeast({ lane: "L3", probabilities: {} }, 0.6)).toBe("L0");
+  });
+});
+
+describe("alternatives", () => {
+  const sure = { L0: 0.02, L1: 0.03, L2: 0.85, L3: 0.05, L4: 0.05 };
+  const laptopCart: Cart = {
+    merchant: "amazon.com",
+    items: [
+      { name: "USB-C cable", price_minor: 1_299, qty: 2 },
+      { name: "  Gaming laptop 16in RTX  ", price_minor: 149_999, qty: 1 },
+    ],
+    total_minor: 152_597,
+    currency: "USD",
+    url: "https://www.amazon.com/cart",
+    cart_hash: "b".repeat(64),
+  };
+  function signal(lane: "L0" | "L2", strategy: "renewed" | "wait_for_deal" | "none", probability: number) {
+    return { lane, confidence: 0.5, probabilities: sure, model: "clef-test", signals: { alternative: { strategy, probability } } };
+  }
+
+  it("suggests the model's pick with a search for the priciest item when there's friction", () => {
+    expect(suggestedAlternative("L2", signal("L2", "renewed", 0.7), laptopCart)).toEqual({
+      strategy: "renewed",
+      probability: 0.7,
+      query: "Gaming laptop 16in RTX",
+    });
+  });
+
+  it("gives no search for a strategy that doesn't link to one", () => {
+    expect(suggestedAlternative("L2", signal("L2", "wait_for_deal", 0.6), laptopCart)).toEqual({ strategy: "wait_for_deal", probability: 0.6 });
+  });
+
+  it("suggests nothing at L0, for none, or when the model is under 50% sure", () => {
+    expect(suggestedAlternative("L0", signal("L0", "renewed", 0.9), laptopCart)).toBeUndefined();
+    expect(suggestedAlternative("L2", signal("L2", "none", 0.9), laptopCart)).toBeUndefined();
+    expect(suggestedAlternative("L2", signal("L2", "renewed", 0.49), laptopCart)).toBeUndefined();
+    expect(suggestedAlternative("L2", null, laptopCart)).toBeUndefined();
+  });
+
+  it("puts the suggestion in the decision context, and keeps it out of the signals", async () => {
+    const service = new DecisionService({
+      repository: new InMemoryDecisionRepository(),
+      decisionModelProvider: { modelVersion: "clef-test", evaluate: async () => ({ ...signal("L2", "renewed", 0.7), signals: { impulse: 0.8, alternative: { strategy: "renewed" as const, probability: 0.7 } } }) },
+      ttlSeconds: 60,
+    });
+
+    const verdict = await service.decide("user-1", laptopCart);
+
+    expect(verdict.lane).toBe("L2");
+    expect(verdict.context?.alternative).toEqual({ strategy: "renewed", probability: 0.7, query: "Gaming laptop 16in RTX" });
+    expect(verdict.context?.model_signal?.signals).toEqual({ impulse: 0.8 });
+    expect(DecisionContextSchema.safeParse(verdict.context).success).toBe(true);
   });
 });

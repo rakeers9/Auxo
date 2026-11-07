@@ -1,4 +1,4 @@
-import type { Verdict } from "@auxo/shared";
+import type { AlternativeStrategy, Verdict } from "@auxo/shared";
 
 import type { ExitAction } from "../messages";
 import { OVERLAY_CSS } from "./styles";
@@ -49,14 +49,15 @@ export function renderOverlay(
   if (clicked !== undefined) dataset.clicked = clicked;
 
   const why = reasonLine(verdict);
+  const idea = ideaFor(verdict);
   return mount(root, dataset, (ctx) => {
     if (clicked !== undefined) {
       // A non-block lane has no block copy of its own; an empty one (L0) borrows a generic line.
       const copy = template.title ? template : { ...template, ...CLICK_PAUSE_COPY };
-      renderBlock({ ...ctx, template: copy, handlers, why }, verdict.cooldown_seconds, clicked);
-    } else if (template.kind === "banner") renderBanner({ ...ctx, template, handlers, why });
-    else if (template.kind === "pause") renderPause({ ...ctx, template, handlers, why }, verdict.cooldown_seconds);
-    else renderBlock({ ...ctx, template, handlers, why }, verdict.cooldown_seconds);
+      renderBlock({ ...ctx, template: copy, handlers, why, idea }, verdict.cooldown_seconds, clicked);
+    } else if (template.kind === "banner") renderBanner({ ...ctx, template, handlers, why, idea });
+    else if (template.kind === "pause") renderPause({ ...ctx, template, handlers, why, idea }, verdict.cooldown_seconds);
+    else renderBlock({ ...ctx, template, handlers, why, idea }, verdict.cooldown_seconds);
   });
 }
 
@@ -91,6 +92,38 @@ interface View extends MountContext {
   handlers: OverlayHandlers;
   // Why the overlay showed up, from the decision context (AUX-50).
   why?: string | undefined;
+  // A kind of alternative that could still satisfy the want.
+  idea?: Idea | undefined;
+}
+
+export interface Idea {
+  text: string;
+  // A search for the alternative on the same store, when there is one.
+  link?: { href: string; text: string };
+}
+
+const IDEAS: Record<Exclude<AlternativeStrategy, "none">, { text: string; linkText?: string; suffix?: string }> = {
+  renewed: { text: "Idea: a renewed or used one could do the same job for less.", linkText: "See renewed options", suffix: " renewed" },
+  cheaper_version: { text: "Idea: a less expensive version might give you the same thing.", linkText: "Compare similar items" },
+  wait_for_deal: { text: "Idea: this may not be urgent. Save it and see if the price drops." },
+  already_own: { text: "Idea: you might already have something that does this, or could borrow it." },
+  fewer: { text: "Idea: a smaller size or quantity might be enough." },
+};
+
+// Amazon's own hosts only: the search link is built for them.
+const AMAZON_HOST = /^(?:www\.)?amazon\.(?:com|ca|co\.uk|de|fr|it|es|in|com\.au|co\.jp|com\.mx)$/;
+
+// The suggestion from the decision context, if the API sent one. The search
+// link is only built for Amazon and only when the API gave a query.
+export function ideaFor(verdict: Verdict): Idea | undefined {
+  const alternative = verdict.context?.alternative;
+  if (!alternative) return undefined;
+  const copy = IDEAS[alternative.strategy];
+  const merchant = verdict.context?.cart_summary.merchant.toLowerCase() ?? "";
+  if (!copy.linkText || !alternative.query || !AMAZON_HOST.test(merchant)) return { text: copy.text };
+  const host = merchant.startsWith("www.") ? merchant : `www.${merchant}`;
+  const href = `https://${host}/s?k=${encodeURIComponent(`${alternative.query}${copy.suffix ?? ""}`)}`;
+  return { text: copy.text, link: { href, text: copy.linkText } };
 }
 
 const BUDGET_REASONS: Partial<Record<string, string>> = {
@@ -155,6 +188,7 @@ function renderBanner(view: View): void {
   const text = el(doc, "div");
   text.append(el(doc, "p", "auxo-title", template.title), el(doc, "p", "auxo-body", template.body));
   if (view.why) text.append(whyLine(doc, view.why));
+  if (view.idea) text.append(ideaLine(doc, view.idea));
   showBanner(view, [text], () => {});
 }
 
@@ -233,6 +267,23 @@ function whyLine(doc: Document, text: string): HTMLElement {
   return line;
 }
 
+// The suggestion line, with its search link opening in a new tab. Text only
+// (textContent): the query is the store's item name.
+function ideaLine(doc: Document, idea: Idea): HTMLElement {
+  const line = el(doc, "p", "auxo-idea", idea.text);
+  line.dataset.role = "idea";
+  if (idea.link) {
+    const link = doc.createElement("a");
+    link.className = "auxo-idea-link";
+    link.href = idea.link.href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = idea.link.text;
+    line.append(" ", link);
+  }
+  return line;
+}
+
 // Backdrop + modal dialog with title, an optional "what was stopped" line,
 // body, countdown line, and an actions row.
 function dialogShell(view: View, stoppedText?: string) {
@@ -255,6 +306,7 @@ function dialogShell(view: View, stoppedText?: string) {
   const actions = el(doc, "div", "auxo-actions");
 
   const why = view.why ? [whyLine(doc, view.why)] : [];
+  if (view.idea) why.push(ideaLine(doc, view.idea));
   if (stoppedText === undefined) {
     dialog.append(title, body, ...why, countdown, actions);
   } else {
@@ -282,7 +334,10 @@ function trapFocus({ doc, stops }: View, dialog: HTMLElement): void {
     if (event.key !== "Tab") return;
     event.preventDefault();
 
-    const buttons = [...dialog.querySelectorAll("button")].filter((b) => !b.disabled);
+    // Buttons and the suggestion's link.
+    const buttons = [...dialog.querySelectorAll<HTMLButtonElement | HTMLAnchorElement>("button, a[href]")].filter(
+      (b) => !(b.tagName === "BUTTON" && (b as HTMLButtonElement).disabled),
+    );
     if (buttons.length === 0) {
       dialog.focus();
       return;
