@@ -7,6 +7,7 @@ export const DecisionReasonCodeSchema = z.enum([
   "rule.cart_total",
   "rule.merchant",
   "rule.item_keyword",
+  "rule.description",
   "budget.warning",
   "budget.critical",
   "budget.exceeded",

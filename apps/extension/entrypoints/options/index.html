@@ -1,10 +1,103 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Auxo connection</title></head>
-<body><h1>Connect Auxo</h1><p>Sign in with an existing Supabase email/password account. Use your project's public key, never its service-role key.</p>
-<form id="login">
-<p><label>Supabase URL <input id="url" type="url" value="https://wckjshamacpnuksxqqcd.supabase.co" required></label></p>
-<p><label>Public publishable / anon key <input id="key" required></label></p>
-<p><label>Email <input id="email" type="email" autocomplete="username" required></label></p>
-<p><label>Password <input id="password" type="password" autocomplete="current-password" required></label></p>
-<button>Sign in</button></form><button id="logout">Sign out</button><p id="status" role="status"></p>
-<script type="module" src="./main.ts"></script></body></html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auxo settings</title>
+    <!-- A full tab: the settings don't fit the small chrome://extensions box. -->
+    <meta name="manifest.open_in_tab" content="true" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #1a1a1a;
+        --muted: #5f6368;
+        --line: #e3e3e3;
+        --accent: #1d4ed8;
+        --focus: #2563eb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1c1e;
+          --fg: #f2f2f2;
+          --muted: #a8a8ad;
+          --line: #3a3a3c;
+          --accent: #93b4ff;
+          --focus: #93b4ff;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 640px; margin: 0 auto; padding: 16px; }
+      h1 { margin: 0 0 4px; font-size: 20px; }
+      .auxo-section { padding: 16px 0; border-top: 1px solid var(--line); }
+      .auxo-heading { margin: 0 0 4px; font-size: 15px; }
+      .auxo-hint, .auxo-label, .auxo-empty { color: var(--muted); }
+      .auxo-hint { margin: 0 0 10px; font-size: 13px; }
+      .auxo-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin: 0 0 10px; }
+      .auxo-field { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; }
+      .auxo-form textarea { width: min(100%, 420px); }
+      textarea, input, select, button { font: inherit; color: inherit; }
+      textarea, input[type="text"], input[type="email"], input[type="password"], input[type="url"], input[type="date"], select {
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--bg);
+        max-width: 100%;
+      }
+      button {
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: transparent;
+        cursor: pointer;
+      }
+      button[type="submit"] { border-color: var(--accent); color: var(--accent); }
+      button:disabled, input:disabled, select:disabled, textarea:disabled { opacity: 0.55; cursor: default; }
+      .auxo-list { list-style: none; margin: 0; padding: 0; }
+      .auxo-item {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 12px;
+        padding: 8px 0;
+        border-top: 1px solid var(--line);
+      }
+      .auxo-item:first-child { border-top: 0; }
+      .auxo-item .auxo-field { flex-direction: row; align-items: center; gap: 4px; }
+      .auxo-summary { flex: 1 1 220px; overflow-wrap: anywhere; }
+      .auxo-status { min-height: 1.45em; margin: 0 0 8px; color: var(--muted); }
+      #account-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+      #account-form .auxo-field { flex: 1 1 200px; }
+      [hidden] { display: none !important; }
+      :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Auxo settings</h1>
+      <section class="auxo-section" aria-labelledby="account-title">
+        <h2 class="auxo-heading" id="account-title">Account</h2>
+        <div id="signed-in" hidden>
+          <p class="auxo-hint">Signed in as <strong id="account-email"></strong>.</p>
+          <button id="logout" type="button">Sign out</button>
+        </div>
+        <form id="account-form">
+          <label class="auxo-field"><span class="auxo-label">Email</span><input id="email" type="email" autocomplete="username" required /></label>
+          <label class="auxo-field"><span class="auxo-label">Password</span><input id="password" type="password" autocomplete="current-password" required /></label>
+          <label class="auxo-field"><span class="auxo-label">Supabase URL</span><input id="url" type="url" value="https://wckjshamacpnuksxqqcd.supabase.co" required /></label>
+          <label class="auxo-field"><span class="auxo-label">Public key (publishable / anon, never the service-role key)</span><input id="key" type="text" required /></label>
+          <button type="submit">Sign in</button>
+        </form>
+        <p id="account-status" class="auxo-status" role="status"></p>
+      </section>
+      <div id="settings"></div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

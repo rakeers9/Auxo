@@ -48,14 +48,15 @@ export function renderOverlay(
   const dataset: Record<string, string> = { lane: template.lane, template: template.id };
   if (clicked !== undefined) dataset.clicked = clicked;
 
+  const why = reasonLine(verdict);
   return mount(root, dataset, (ctx) => {
     if (clicked !== undefined) {
       // A non-block lane has no block copy of its own; an empty one (L0) borrows a generic line.
       const copy = template.title ? template : { ...template, ...CLICK_PAUSE_COPY };
-      renderBlock({ ...ctx, template: copy, handlers }, verdict.cooldown_seconds, clicked);
-    } else if (template.kind === "banner") renderBanner({ ...ctx, template, handlers });
-    else if (template.kind === "pause") renderPause({ ...ctx, template, handlers }, verdict.cooldown_seconds);
-    else renderBlock({ ...ctx, template, handlers }, verdict.cooldown_seconds);
+      renderBlock({ ...ctx, template: copy, handlers, why }, verdict.cooldown_seconds, clicked);
+    } else if (template.kind === "banner") renderBanner({ ...ctx, template, handlers, why });
+    else if (template.kind === "pause") renderPause({ ...ctx, template, handlers, why }, verdict.cooldown_seconds);
+    else renderBlock({ ...ctx, template, handlers, why }, verdict.cooldown_seconds);
   });
 }
 
@@ -88,6 +89,32 @@ interface MountContext {
 interface View extends MountContext {
   template: OverlayTemplate;
   handlers: OverlayHandlers;
+  // Why the overlay showed up, from the decision context (AUX-50).
+  why?: string | undefined;
+}
+
+const BUDGET_REASONS: Partial<Record<string, string>> = {
+  "budget.exceeded": "This would put you over your spending limit.",
+  "budget.critical": "This would bring you close to your spending limit.",
+  "budget.warning": "This would use most of your spending limit.",
+};
+
+// One line saying what set the lane: the user's own rule, else their budget.
+// Undefined when neither did (the model's own pick, the stub, no context).
+export function reasonLine(verdict: Verdict): string | undefined {
+  const context = verdict.context;
+  if (!context) return undefined;
+  const rules = context.matched_rules.filter((rule) => rule.lane === verdict.lane);
+  const first = rules[0];
+  if (first) {
+    const more = rules.length - 1;
+    return more > 0 ? `Your rules: “${first.name}” and ${more} more.` : `Your rule: “${first.name}”.`;
+  }
+  for (const factor of context.decisive_factors) {
+    const reason = factor.source === "budget" && factor.lane === verdict.lane ? BUDGET_REASONS[factor.code] : undefined;
+    if (reason) return reason;
+  }
+  return undefined;
 }
 
 // Adds a <style> and a container to `root`, lets `build` fill the container,
@@ -127,6 +154,7 @@ function renderBanner(view: View): void {
   const { doc, template } = view;
   const text = el(doc, "div");
   text.append(el(doc, "p", "auxo-title", template.title), el(doc, "p", "auxo-body", template.body));
+  if (view.why) text.append(whyLine(doc, view.why));
   showBanner(view, [text], () => {});
 }
 
@@ -198,6 +226,13 @@ function renderBlock(view: View, cooldownSeconds: number, clicked?: string): voi
   leave.dataset.autofocus = "";
 }
 
+// Text only (textContent): a rule's name is the user's own words.
+function whyLine(doc: Document, text: string): HTMLElement {
+  const line = el(doc, "p", "auxo-why", text);
+  line.dataset.role = "why";
+  return line;
+}
+
 // Backdrop + modal dialog with title, an optional "what was stopped" line,
 // body, countdown line, and an actions row.
 function dialogShell(view: View, stoppedText?: string) {
@@ -219,13 +254,14 @@ function dialogShell(view: View, stoppedText?: string) {
   countdown.dataset.role = "countdown";
   const actions = el(doc, "div", "auxo-actions");
 
+  const why = view.why ? [whyLine(doc, view.why)] : [];
   if (stoppedText === undefined) {
-    dialog.append(title, body, countdown, actions);
+    dialog.append(title, body, ...why, countdown, actions);
   } else {
     const stopped = el(doc, "p", "auxo-stopped", stoppedText);
     stopped.id = `${id}-stopped`;
     stopped.dataset.role = "stopped";
-    dialog.append(title, stopped, body, countdown, actions);
+    dialog.append(title, stopped, body, ...why, countdown, actions);
   }
   backdrop.append(dialog);
   container.append(backdrop);

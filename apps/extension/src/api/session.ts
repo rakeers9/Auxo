@@ -27,6 +27,14 @@ export async function configureAuth(url: string, key: string): Promise<void> {
   client = null;
 }
 
+// Thrown instead of sending a request to a remote API while signed out.
+export class SignedOutError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "SignedOutError";
+  }
+}
+
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 // The local API (AUTH_MODE=development) answers unsigned requests as its
@@ -47,12 +55,12 @@ export const authenticatedFetch: typeof fetch = async (input, init) => {
   const auth = await authClient();
   if (!auth) {
     if (isLoopbackRequest(input)) return fetch(input, init);
-    throw new Error("Sign in through Auxo's options page.");
+    throw new SignedOutError("Sign in through Auxo's options page.");
   }
   const { data, error } = await auth.auth.getSession();
   if (error || !data.session) {
     if (isLoopbackRequest(input)) return fetch(input, init);
-    throw new Error("Sign in required.");
+    throw new SignedOutError("Sign in required.");
   }
   const send = (token: string) => {
     const headers = new Headers(init?.headers);

@@ -85,7 +85,9 @@ describe("POST /v1/decide with a trigger", () => {
       payload: { cart: cartWithHashSuffix("0"), trigger: trigger("add_to_cart") },
     });
 
-    expect(response.json()).toMatchObject({ lane: "L4", action: "block" });
+    // The matched rule's L3, not the model's L4: a lane the user set wins
+    // over the model's own pick (AUX-50).
+    expect(response.json()).toMatchObject({ lane: "L3", action: "block" });
     expect(evaluate).toHaveBeenCalledOnce();
   });
 
