@@ -1,7 +1,7 @@
 import { CartSchema } from "@auxo/shared";
 import { describe, expect, it } from "vitest";
 
-import { extractAmazonCart, isAmazonCartPage } from "./amazon";
+import { extractAmazonCart, isAmazonCartPage, readAmazonCart } from "./amazon";
 import { hashCart } from "./hash";
 // Sanitized copies of real amazon.com pages (product names and IDs replaced).
 import cartHtml from "./__fixtures__/amazon-cart.html?raw";
@@ -55,6 +55,27 @@ describe("extractAmazonCart", () => {
     });
   });
 
+  it("reads a Subscribe & Save price past the cent from data-displayprice", () => {
+    // A real cart had data-price="8.982" (9.98 less 10%), data-displayprice="8.98"
+    // and a subtotal of $8.98. Same shape here on the cable.
+    const doc = parse(cartHtml);
+    const item = doc.querySelector('#sc-active-cart [data-asin="B0TEST0002"]')!;
+    item.setAttribute("data-price", "8.991");
+    item.setAttribute("data-displayprice", "8.99");
+    doc.querySelector("#sc-subtotal-amount-buybox .sc-price")!.textContent = "$125.84";
+    const reading = readAmazonCart(doc, CART_URL);
+    expect(reading.problems).toEqual([]);
+    expect(reading.draft?.items[1]).toEqual({ ...cable, price_minor: 899 });
+    expect(reading.draft?.total_minor).toBe(12584);
+  });
+
+  it("still gives up when data-displayprice is more than a cent off data-price", () => {
+    const doc = parse(cartHtml);
+    const item = doc.querySelector('#sc-active-cart [data-asin="B0TEST0002"]')!;
+    item.setAttribute("data-price", "8.991");
+    expect(readAmazonCart(doc, CART_URL).problems).toEqual(['item 2 has no readable data-price: "8.991"']);
+  });
+
   it("keeps qty > 1 as one line with a unit price", () => {
     const cart = extractAmazonCart(parse(cartHtml), CART_URL);
     expect(cart?.items[0]).toEqual({ name: mug.name, price_minor: 999, qty: 3 });
@@ -72,6 +93,29 @@ describe("extractAmazonCart", () => {
       total_minor: 9687,
       currency: "USD",
       url: "https://www.amazon.com/gp/cart/view.html",
+    });
+  });
+
+  describe("items the shopper hasn't ticked", () => {
+    const untick = (doc: Document, asins: string[]) => {
+      for (const asin of asins) doc.querySelector(`#sc-active-cart [data-asin="${asin}"]`)!.setAttribute("data-isselected", "0");
+    };
+
+    it("leaves unticked items out, so the lines match Amazon's subtotal", () => {
+      const doc = parse(cartHtml);
+      untick(doc, ["B0TEST0001"]);
+      doc.querySelector("#sc-subtotal-amount-buybox")!.textContent = "$96.87";
+      expect(extractAmazonCart(doc, CART_URL)?.items).toEqual([cable, speaker, lamp]);
+    });
+
+    it("says nothing is selected, without a subtotal mismatch, when every item is unticked", () => {
+      const doc = parse(cartHtml);
+      untick(doc, ["B0TEST0001", "B0TEST0002", "B0TEST0003", "B0TEST0004"]);
+      doc.querySelector("#sc-subtotal-amount-buybox")!.textContent = "$0.00";
+      const reading = readAmazonCart(doc, CART_URL);
+      expect(reading.draft).toBeNull();
+      expect(reading.problems).toEqual(["nothing is selected for checkout (4 items in the cart, none ticked)"]);
+      expect(reading.details["not selected"]).toBe("4");
     });
   });
 

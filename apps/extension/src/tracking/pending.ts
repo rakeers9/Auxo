@@ -28,6 +28,9 @@ export interface PendingStore {
   saveClick(click: PendingClick): void;
   // Returns the remembered click, if any, and clears it.
   takeClick(): PendingClick | null;
+  // Forgets the remembered click, but only if it has this intent (the click
+  // was answered on the page it happened on, so no later page should use it).
+  dropClick(intent: ClickSignal["intent"]): void;
   savePurchase(purchase: PendingPurchase): void;
   // Returns the remembered purchase, if any, and clears it.
   takePurchase(): PendingPurchase | null;
@@ -40,6 +43,11 @@ export function createPendingStore(storage: Storage | null): PendingStore {
     takeClick: () => {
       const click = take(storage, CLICK_KEY);
       return isPendingClick(click) ? click : null;
+    },
+    dropClick: (intent) => {
+      const click = take(storage, CLICK_KEY);
+      // Put back a click of another kind: only this intent is forgotten.
+      if (isPendingClick(click) && click.signal.intent !== intent) write(storage, CLICK_KEY, click);
     },
     savePurchase: (purchase) => write(storage, PURCHASE_KEY, purchase),
     takePurchase: () => {

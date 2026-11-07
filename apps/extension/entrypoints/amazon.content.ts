@@ -1,8 +1,12 @@
+import type { Reader } from "@auxo/shared";
+import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 
-import { AMAZON_SELECTORS, inspectAmazonPage, readAmazonMiniCart, resolveAmazonSelectors } from "../src/cart";
+import { AMAZON_SELECTORS, inspectAmazonPage, readAmazonMiniCart, resolveAmazonSelectors, waitForAmazonOrderConfirmation } from "../src/cart";
 import { classifyChange, classifyClick, classifySubmit } from "../src/clicks";
+import { createReadFailureNotifier } from "../src/content/read-failures";
 import { startStore, type StoreAdapter } from "../src/content/runtime";
+import type { PageType } from "../src/messages";
 import { MINI_CART, watchMiniCart } from "../src/tracking/sidesheet";
 import { watchForChanges } from "../src/watch";
 
@@ -24,10 +28,30 @@ function cartRegions(overrides: Record<string, string> | undefined): Element[] |
   return regions.length > 0 ? regions : null;
 }
 
+// Which reader read each kind of page, for reader failure reports.
+const READERS: Record<PageType, Reader | null> = {
+  product: "amazon_product",
+  cart: "amazon_cart",
+  checkout: "amazon_checkout",
+  added_to_cart: "amazon_added_to_cart",
+  other: null,
+};
+
+// Codes only, once per failure per page load (AUX-47). Fire and forget.
+const reportFailure = createReadFailureNotifier((message) => void browser.runtime.sendMessage(message).catch(() => {}));
+
 // Amazon is read from the page itself, so every reading is synchronous.
 const amazon: StoreAdapter = {
-  inspect: (overrides) => inspectAmazonPage(document, new URL(location.href), overrides?.selectors),
+  inspect: (overrides) => {
+    const page = inspectAmazonPage(document, new URL(location.href), overrides?.selectors);
+    reportFailure(READERS[page.pageType], page.pageType, page.problems);
+    return page;
+  },
   panelInspection: (overrides) => inspectAmazonPage(document, new URL(location.href), overrides?.selectors),
+  // "Order placed, thanks!": sends "bought" for the purchase saved at Place your order (AUX-23).
+  // Waits up to 5s on the thank-you page in case the alert is drawn late.
+  isOrderConfirmation: (overrides, signal) =>
+    waitForAmazonOrderConfirmation(document, new URL(location.href), overrides?.selectors, { signal }),
   panelSidebar: (overrides) => {
     if (!document.querySelector(MINI_CART)) return null;
     const reading = readAmazonMiniCart(document, new URL(location.href), overrides?.selectors);
@@ -54,7 +78,11 @@ const amazon: StoreAdapter = {
     const stopSidebar =
       loadedAs === "cart" || loadedAs === "checkout"
         ? () => {}
-        : watchMiniCart(document, () => readAmazonMiniCart(document, new URL(location.href), overrides?.selectors).draft, {
+        : watchMiniCart(document, () => {
+            const reading = readAmazonMiniCart(document, new URL(location.href), overrides?.selectors);
+            reportFailure("amazon_minicart", loadedAs, reading.problems);
+            return reading.draft;
+          }, {
             onChange: (before, after, diff) => reportChange(before, after, diff),
           });
     return () => {

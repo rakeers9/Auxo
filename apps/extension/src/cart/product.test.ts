@@ -2,9 +2,10 @@ import { CartSchema } from "@auxo/shared";
 import { describe, expect, it } from "vitest";
 
 import { hashCart } from "./hash";
-import { extractAmazonProduct, isAmazonProductPage } from "./product";
+import { extractAmazonProduct, isAmazonProductPage, readAmazonProduct } from "./product";
 // Sanitized copies of real amazon.com pages (product names and IDs replaced).
 import productHtml from "./__fixtures__/amazon-product.html?raw";
+import accordionHtml from "./__fixtures__/amazon-product-accordion.html?raw";
 import cartHtml from "./__fixtures__/amazon-cart.html?raw";
 import emptyCartHtml from "./__fixtures__/amazon-cart-empty.html?raw";
 import checkoutHtml from "./__fixtures__/amazon-checkout-from-cart.html?raw";
@@ -84,13 +85,20 @@ describe("extractAmazonProduct", () => {
 
   describe("returns null instead of guessing", () => {
     it.each<[string, (d: Document) => void]>([
-      ["the buy box price is missing", (d) => d.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")!.remove()],
+      ["no price can be found anywhere", (d) => { d.querySelectorAll(".apex-pricetopay-value").forEach((e) => e.remove()); d.getElementById("corePriceDisplay_desktop_feature_div")?.remove(); }],
       ["the buy box price disagrees with the page price", (d) => { d.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")!.textContent = "$44.98"; }],
       ["the quantity dropdown is missing", (d) => quantity(d).remove()],
       ["the title is missing", (d) => { d.querySelector("span#productTitle")!.textContent = " "; }],
     ])("when %s", (_label, change) => {
       expect(extractAmazonProduct(productWith(change), PRODUCT_URL)).toBeNull();
     });
+  });
+
+  it("still reads the price when the exact buy box selector finds nothing (digit spans)", () => {
+    const doc = productWith((d) => d.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")!.remove());
+    const reading = readAmazonProduct(doc, PRODUCT_URL);
+    expect(reading.draft?.total_minor).toBe(4598);
+    expect(reading.details.price).toBe("$45.98 via near form + page price");
   });
 
   it("still reads the buy box price when the page doesn't repeat it", () => {
@@ -102,5 +110,161 @@ describe("extractAmazonProduct", () => {
     const draft = extractAmazonProduct(parse(productHtml), PRODUCT_URL);
     expect(draft).not.toBeNull();
     expect(CartSchema.safeParse({ ...draft!, cart_hash: await hashCart(draft!) }).success).toBe(true);
+  });
+});
+
+// Real page where the price to pay sits in the accordion row's header, outside
+// form#addToCart, so the exact buy box selector finds nothing. The page also
+// offers a used copy at $13.99 and shows a struck-through $21.99 list price.
+describe("accordion buy box (price beside the form, not inside it)", () => {
+  const URL_ACCORDION = new URL("https://www.amazon.com/Cat-Water-Fountain/dp/B0TEST0006/ref=sr_1_6?keywords=cat");
+
+  it("the exact buy box selector alone finds nothing here", () => {
+    const doc = parse(accordionHtml);
+    expect(doc.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")).toBeNull();
+  });
+
+  it("reads the new price, not the used offer or the list price", () => {
+    const reading = readAmazonProduct(parse(accordionHtml), URL_ACCORDION);
+    expect(reading.problems).toEqual([]);
+    expect(reading.draft).toEqual({
+      merchant: "amazon.com",
+      items: [{ name: "Cat water fountain", price_minor: 1999, qty: 1 }],
+      total_minor: 1999,
+      currency: "USD",
+      url: "https://www.amazon.com/dp/B0TEST0006",
+    });
+  });
+
+  it("says which layers found the price", () => {
+    expect(readAmazonProduct(parse(accordionHtml), URL_ACCORDION).details.price).toBe("$19.99 via near form + page price");
+  });
+
+  it("reads the price from the digit spans when the offscreen copy is blank", () => {
+    const doc = parse(accordionHtml);
+    doc.querySelectorAll("#corePrice_feature_div .a-offscreen").forEach((e) => { e.textContent = " "; });
+    const reading = readAmazonProduct(doc, URL_ACCORDION);
+    expect(reading.draft?.total_minor).toBe(1999);
+  });
+
+  it("flags a conflict instead of choosing when the layers disagree", () => {
+    const doc = parse(accordionHtml);
+    // The header says $14.99 while the price under the title says $19.99.
+    doc.querySelector("#newAccordionRow_0 .apex-pricetopay-value .a-offscreen")!.textContent = "$14.99";
+    doc.querySelector("#newAccordionRow_0 .apex-pricetopay-value .a-price-whole")!.firstChild!.textContent = "14";
+    const reading = readAmazonProduct(doc, URL_ACCORDION);
+    expect(reading.draft).toBeNull();
+    expect(reading.problems).toEqual(["conflicting prices: near form $14.99, page price $19.99"]);
+    expect(reading.details.price).toBe("(conflict)");
+  });
+
+  it("explains why when no layer can read a price", () => {
+    const doc = parse(accordionHtml);
+    doc.querySelectorAll(".apex-pricetopay-value").forEach((e) => e.remove());
+    doc.getElementById("corePriceDisplay_desktop_feature_div")?.remove();
+    const reading = readAmazonProduct(doc, URL_ACCORDION);
+    expect(reading.draft).toBeNull();
+    expect(reading.problems).toEqual([
+      "no price found (buy box: selector matched nothing; near form: no price to pay around the form; page price: not shown)",
+    ]);
+  });
+
+  // What Amazon does when the shopper picks the "Used" row: the active class
+  // moves, the New panels are hidden (not removed), and the Used ones shown.
+  function selectUsedOffer(doc: Document): void {
+    doc.getElementById("newAccordionRow_0")!.classList.remove("a-accordion-active");
+    doc.getElementById("usedAccordionRow")!.classList.add("a-accordion-active");
+    const show = (id: string, on: boolean) => { doc.getElementById(id)!.style.display = on ? "block" : "none"; };
+    show("a-accordion-auto-0", false);
+    show("a-accordion-auto-7", true);
+    show("apex_desktop_newAccordionRow", false);
+    show("apex_desktop_usedAccordionRow", true);
+  }
+
+  it("names the selected offer", () => {
+    expect(readAmazonProduct(parse(accordionHtml), URL_ACCORDION).details.offer).toBe("Buy New");
+  });
+
+  describe("when the shopper picks the Used offer", () => {
+    it("reads the used price, not the hidden new one", () => {
+      const doc = parse(accordionHtml);
+      selectUsedOffer(doc);
+      const reading = readAmazonProduct(doc, URL_ACCORDION);
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft?.items).toEqual([{ name: "Cat water fountain", price_minor: 1399, qty: 1 }]);
+      expect(reading.draft?.total_minor).toBe(1399);
+    });
+
+    it("says it is the used offer, with one unit, and which layers agreed", () => {
+      const doc = parse(accordionHtml);
+      selectUsedOffer(doc);
+      expect(readAmazonProduct(doc, URL_ACCORDION).details).toMatchObject({
+        offer: "Used - Like New",
+        price: "$13.99 via near form + page price",
+        qty: '"1" (offer has no quantity choice)',
+      });
+    });
+
+    it("goes back to the new price when New is selected again", () => {
+      const doc = parse(accordionHtml);
+      selectUsedOffer(doc);
+      expect(extractAmazonProduct(doc, URL_ACCORDION)?.total_minor).toBe(1399);
+      doc.getElementById("usedAccordionRow")!.classList.remove("a-accordion-active");
+      doc.getElementById("newAccordionRow_0")!.classList.add("a-accordion-active");
+      doc.getElementById("apex_desktop_newAccordionRow")!.style.display = "block";
+      doc.getElementById("apex_desktop_usedAccordionRow")!.style.display = "none";
+      expect(extractAmazonProduct(doc, URL_ACCORDION)?.total_minor).toBe(1999);
+    });
+  });
+
+  // The shopper picks "Subscribe & Save": its row becomes active, the others hide.
+  function selectSubscribeOffer(doc: Document): void {
+    for (const id of ["newAccordionRow_0", "usedAccordionRow"]) doc.getElementById(id)!.classList.remove("a-accordion-active");
+    doc.getElementById("snsAccordionRowMiddle")!.classList.add("a-accordion-active");
+    const show = (id: string, on: boolean) => { doc.getElementById(id)!.style.display = on ? "block" : "none"; };
+    show("a-accordion-auto-0", false);
+    show("a-accordion-auto-9", true);
+    show("apex_desktop_newAccordionRow", false);
+    show("apex_desktop_snsAccordionRowMiddle", true);
+  }
+
+  describe("when the shopper picks Subscribe & Save", () => {
+    it("reads the subscription price, not the new price or the hidden bigger-discount tier", () => {
+      const doc = parse(accordionHtml);
+      selectSubscribeOffer(doc);
+      const reading = readAmazonProduct(doc, URL_ACCORDION);
+      expect(reading.problems).toEqual([]);
+      expect(reading.draft?.items).toEqual([{ name: "Cat water fountain", price_minor: 1249, qty: 1 }]);
+      expect(reading.details).toMatchObject({ offer: "Subscribe & Save", price: "$12.49 via near form + page price" });
+    });
+
+    it("uses the subscription's own quantity dropdown", () => {
+      const doc = parse(accordionHtml);
+      selectSubscribeOffer(doc);
+      doc.querySelector<HTMLSelectElement>("#rcxsubsQuan")!.innerHTML = '<option value="3" selected>3</option>';
+      const reading = readAmazonProduct(doc, URL_ACCORDION);
+      expect(reading.draft?.items[0]?.qty).toBe(3);
+      expect(reading.draft?.total_minor).toBe(3747);
+      expect(reading.details.qty).toBe('"3"');
+    });
+  });
+
+  it("a New offer that has a quantity dropdown still uses it", () => {
+    const doc = parse(accordionHtml);
+    const select = doc.querySelector<HTMLSelectElement>("#newAccordionRow_0 select#quantity")!;
+    select.innerHTML = '<option value="1">1</option><option value="3" selected>3</option>';
+    const draft = extractAmazonProduct(doc, URL_ACCORDION);
+    expect(draft?.items[0]?.qty).toBe(3);
+    expect(draft?.total_minor).toBe(5997);
+  });
+
+  it("two different prices to pay beside one form are a conflict, not a pick", () => {
+    const doc = parse(accordionHtml);
+    // A second price to pay in the same row (e.g. a bundle) with another number.
+    const row = doc.querySelector("#newAccordionRow_0 .apex-pricetopay-value")!;
+    const other = row.cloneNode(true) as Element;
+    other.querySelector(".a-offscreen")!.textContent = "$24.99";
+    row.after(other);
+    expect(readAmazonProduct(doc, URL_ACCORDION).problems[0]).toContain("conflicting prices: near form $19.99 / $24.99");
   });
 });

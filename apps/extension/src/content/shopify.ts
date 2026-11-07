@@ -4,6 +4,7 @@ import { readShopifyCart, shopifyPageType } from "../cart";
 import { classifyChange, classifyClick, classifySubmit } from "../clicks";
 import type { CartDraft, PageInspection } from "../messages";
 import { watchCartApi } from "../tracking/cart-api-watch";
+import type { ReadFailureNotifier } from "./read-failures";
 import type { StoreAdapter } from "./runtime";
 
 export const SHOPIFY_CART_TIMEOUT_MS = 2_500;
@@ -35,13 +36,23 @@ export async function readShopifyCartFrom(
 // Shopify: the cart comes from /cart.js, not the page, so reads are async and
 // cart changes (adds from the product page, edits on /cart, the cart drawer)
 // are noticed by re-reading /cart.js after the page changes.
-export function createShopifyAdapter(deps: { fetch: typeof fetch; location: () => URL; doc: Document }): StoreAdapter {
+// `reportFailure` gets every cart page reading, for reader failure codes.
+export function createShopifyAdapter(deps: {
+  fetch: typeof fetch;
+  location: () => URL;
+  doc: Document;
+  reportFailure?: ReadFailureNotifier;
+}): StoreAdapter {
   const read = () => readShopifyCartFrom(deps.location(), deps.fetch);
 
   return {
     async inspect(): Promise<PageInspection> {
       const pageType = shopifyPageType(deps.location());
-      if (pageType === "cart") return { pageType, ...(await read()) };
+      if (pageType === "cart") {
+        const reading = await read();
+        deps.reportFailure?.("shopify_cart", "cart", reading.problems);
+        return { pageType, ...reading };
+      }
       return {
         pageType,
         draft: null,

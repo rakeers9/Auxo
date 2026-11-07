@@ -34,6 +34,20 @@ describe("pending clicks", () => {
     expect(createPendingStore(sessionStorage).takeClick()).toEqual(click);
   });
 
+  it("dropClick forgets a click of that intent only", () => {
+    const store = createPendingStore(sessionStorage);
+    store.saveClick({ ...click, signal: { ...click.signal, intent: "add_to_cart" } });
+    store.dropClick("add_to_cart");
+    expect(store.takeClick()).toBeNull();
+
+    store.saveClick(click); // buy_now
+    store.dropClick("add_to_cart");
+    expect(store.takeClick()).toEqual(click);
+
+    store.dropClick("add_to_cart"); // nothing remembered: no error
+    expect(store.takeClick()).toBeNull();
+  });
+
   it("has no time limit: an old click is still used by the next read", () => {
     const store = createPendingStore(sessionStorage);
     store.saveClick({ ...click, at: "2020-01-01T00:00:00.000Z" });

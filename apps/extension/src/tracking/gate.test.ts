@@ -2,7 +2,7 @@ import type { Verdict } from "@auxo/shared";
 import { describe, expect, it } from "vitest";
 
 import type { ClickSignal } from "../messages";
-import { createClickGate } from "./gate";
+import { createClickGate, enforcementEnabled, forceBlockEnabled } from "./gate";
 
 const verdict = (lane: Verdict["lane"], action: Verdict["action"], id = "11111111-1111-4111-8111-111111111111"): Verdict => ({
   decision_id: id,
@@ -25,12 +25,27 @@ describe("createClickGate (production)", () => {
     }
   });
 
-  it("lets clicks through for allow and pause answers, or no answer", () => {
+  it("blocks known buy clicks when the page's answer is pause, so a fast click can't skip the wait", () => {
+    const g = gate();
+    g.setVerdict(verdict("L2", "pause"));
+    for (const intent of ["add_to_cart", "buy_now", "checkout", "place_order"] as const) {
+      expect(g.check(known(intent))).toEqual({ block: true, verdict: verdict("L2", "pause"), synthetic: false });
+    }
+  });
+
+  it("lets a pause's clicks through once the user continues past it", () => {
+    const g = gate();
+    g.setVerdict(verdict("L2", "pause"));
+    g.override("11111111-1111-4111-8111-111111111111", Date.now() + 60_000);
+    expect(g.check(known("place_order"))).toEqual({ block: false });
+  });
+
+  it("lets clicks through for allow answers, or no answer", () => {
     const g = gate();
     expect(g.check(known("place_order"))).toEqual({ block: false });
-    g.setVerdict(verdict("L2", "pause"));
-    expect(g.check(known("place_order"))).toEqual({ block: false });
     g.setVerdict(verdict("L1", "allow"));
+    expect(g.check(known("place_order"))).toEqual({ block: false });
+    g.setVerdict(verdict("L0", "allow"));
     expect(g.check(known("place_order"))).toEqual({ block: false });
   });
 
@@ -85,5 +100,30 @@ describe("createClickGate (dev: always on)", () => {
   it("still never gates guesses", () => {
     const g = createClickGate({ alwaysOn: true, devVerdict });
     expect(g.check({ intent: "buy_now", source: "guess" })).toEqual({ block: false });
+  });
+});
+
+describe("forceBlockEnabled", () => {
+  it("is on only in dev builds with WXT_FORCE_BLOCK=1", () => {
+    expect(forceBlockEnabled("development", "1")).toBe(true);
+    expect(forceBlockEnabled("development", undefined)).toBe(false);
+    expect(forceBlockEnabled("development", "0")).toBe(false);
+    expect(forceBlockEnabled("production", "1")).toBe(false);
+  });
+});
+
+describe("enforcement flag", () => {
+  it("is on only with WXT_ENFORCE=1", () => {
+    expect(enforcementEnabled("1")).toBe(true);
+    expect(enforcementEnabled(undefined)).toBe(false);
+    expect(enforcementEnabled("0")).toBe(false);
+  });
+
+  it("never blocks when disabled, even with a block answer or always-on", () => {
+    for (const alwaysOn of [false, true]) {
+      const g = createClickGate({ enabled: false, alwaysOn, devVerdict });
+      g.setVerdict(verdict("L4", "block"));
+      expect(g.check(known("add_to_cart"))).toEqual({ block: false });
+    }
   });
 });

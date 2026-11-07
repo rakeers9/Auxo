@@ -42,3 +42,18 @@ reads them with the service-role client.
   an older version.
 - The response `version` is a sha256 of the served stores (`"default"` when
   there are none), so it changes exactly when the served content does.
+
+## Reader failures (`POST /v1/read-failures`, AUX-47)
+
+`read_failures` holds one row per report of why the extension couldn't read a
+page: `day`, `reader`, `page_type`, `store_host` (only `www.amazon.com`; null
+for other stores), `extension_version` and `codes`. Nothing else: no user, URL,
+item, price, page text or time of day. RLS is on with no policies and table
+grants are revoked, so only the service role reads or writes it.
+
+`read_failure_ranking` is the to-do list: per reader and code over the last 30
+days, the number of reports, days seen, last day seen, and the page types and
+extension versions involved, most reported first. Read it with the service
+role (SQL editor or the service key). The codes are defined in
+`packages/shared/read-failures.ts` and mapped from reader messages in
+`apps/extension/src/cart/codes.ts`; `unknown` means a message with no mapping yet.

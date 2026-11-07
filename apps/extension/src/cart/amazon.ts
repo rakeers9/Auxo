@@ -1,11 +1,13 @@
 import type { CartDraft } from "../messages";
-import { parsePriceToMinor } from "./price";
+import { parsePriceToMinor, parseShownPriceNear } from "./price";
 import { CURRENCY, cleanName, emptyReading, finishReading, quote, type Reading } from "./reading";
 import { resolveAmazonSelectors, withConfigNotes, type SelectorOverrides } from "./selectors";
 
 // Selectors (AMAZON_SELECTORS "cart.*") come from real amazon.com cart pages
 // (sanitized copies live in __fixtures__). Items in the Active Items list carry
 // their own data-price (unit price), data-quantity and data-producttitle.
+// data-price can run past the cent (Subscribe & Save); then data-displayprice,
+// the rounded price the subtotal uses, is read instead.
 
 export function isAmazonHost(url: URL): boolean {
   return url.protocol === "https:" && url.hostname === "www.amazon.com";
@@ -33,6 +35,7 @@ export function readAmazonCart(doc: Document, url: URL, overrides?: SelectorOver
   const details: Record<string, string> = {};
   const items: CartDraft["items"] = [];
   let removed = 0;
+  let unselected = 0;
 
   const elements = [...doc.querySelectorAll(s["cart.activeItems"])];
   elements.forEach((element, index) => {
@@ -42,10 +45,16 @@ export function readAmazonCart(doc: Document, url: URL, overrides?: SelectorOver
       removed++;
       return;
     }
+    // Unticked items aren't in Amazon's subtotal or in checkout.
+    if (element.matches(s["cart.unselectedItem"])) {
+      unselected++;
+      return;
+    }
     const label = `item ${index + 1}`;
     const name = cleanName(element.getAttribute("data-producttitle") || element.querySelector(s["cart.itemTitle"])?.textContent);
     const priceText = element.getAttribute("data-price");
-    const priceMinor = parsePriceToMinor(priceText ?? "", CURRENCY);
+    const shownText = element.getAttribute("data-displayprice");
+    const priceMinor = parsePriceToMinor(priceText ?? "", CURRENCY) ?? parseShownPriceNear(priceText ?? "", shownText ?? "", CURRENCY);
     const qtyText = element.getAttribute("data-quantity");
     const qty = qtyText !== null && /^\d+$/.test(qtyText) ? Number(qtyText) : 0;
 
@@ -57,9 +66,16 @@ export function readAmazonCart(doc: Document, url: URL, overrides?: SelectorOver
 
   details["items seen"] = String(elements.length);
   details["removed"] = String(removed);
+  if (unselected > 0) details["not selected"] = String(unselected);
   const subtotalText = doc.querySelector(s["cart.subtotal"])?.textContent ?? null;
   details["subtotal"] = quote(subtotalText);
 
+  if (elements.length - removed > 0 && unselected === elements.length - removed) {
+    // Every item is unticked: nothing is going to checkout yet. Not a cart to
+    // decide on, and not a reading error either.
+    problems.push(`nothing is selected for checkout (${unselected} items in the cart, none ticked)`);
+    return withConfigNotes({ draft: null, problems, details }, notes);
+  }
   if (elements.length - removed === 0) {
     // Verifiably empty only when the page agrees with itself: no live items,
     // no subtotal, and the nav bar counts 0 (real page after the last item was
@@ -73,7 +89,7 @@ export function readAmazonCart(doc: Document, url: URL, overrides?: SelectorOver
     problems.push("no items in the active cart");
   }
   const total = parsePriceToMinor(subtotalText ?? "", CURRENCY);
-  if (elements.length - removed > 0 && total === null) {
+  if (elements.length - removed - unselected > 0 && total === null) {
     problems.push(subtotalText === null ? `no subtotal (${s["cart.subtotal"]}) on the page` : `subtotal ${quote(subtotalText)} isn't a readable price`);
   }
 

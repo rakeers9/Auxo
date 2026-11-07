@@ -6,7 +6,6 @@ import {
 } from "wxt/utils/content-script-ui/shadow-root";
 import type { ContentScriptContext } from "wxt/utils/content-script-context";
 
-import { buildExitEvent } from "../api/events";
 import { hashCart } from "../cart";
 import { createDebugPanel, type BackendStatus, type DebugPanel } from "../debug/panel";
 import { CONTENT_TIMEOUT_MS, createCartFlow, type CartFlowOutcome } from "../flow";
@@ -33,17 +32,22 @@ import type {
   WishlistSaveMessage,
 } from "../messages";
 import { renderClickAgainHint, renderOverlay, type OverlayHandle } from "../overlay";
-import { createClickGate } from "../tracking/gate";
+import { ENFORCE } from "../flags";
+import { createClickGate, forceBlockEnabled } from "../tracking/gate";
 import { listenForBuyIntents } from "../tracking/listener";
 import { createMiniCartHandler } from "../tracking/minicart-handler";
 import type { MiniCartDiff } from "../tracking/sidesheet";
 import { createPendingStore } from "../tracking/pending";
+import { confirmPurchase } from "../tracking/purchase";
+import { createOverrideCarry } from "../tracking/override-carry";
 import { createTracker } from "../tracking/tracker";
+import { handleOverlayExit, type ExitDeps, type PassMessage, type PassReply } from "./exit";
 
 // Dev builds (`wxt` or `wxt build --mode development`) show the always-on
-// debug panel instead of the overlay, to check what the extension reads, and
-// block every known buy click so the click-again flow can be tried.
+// debug panel instead of the overlay, to check what the extension reads.
+// Clicks follow the backend's answer unless WXT_FORCE_BLOCK=1 is set.
 export const DEBUG = import.meta.env.MODE === "development";
+const FORCE_BLOCK = forceBlockEnabled(import.meta.env.MODE, import.meta.env.WXT_FORCE_BLOCK);
 
 // Dev only: the answer used to block a click when the page has none yet.
 // Never sent to the backend.
@@ -85,6 +89,10 @@ export interface StoreAdapter {
   // Compared at load with the last cart any tab saw, to catch changes made
   // elsewhere (another tab, the app).
   fullCart?(overrides: StoreOverrides | null): CartDraft | null | Promise<CartDraft | null>;
+  // This page confirms that an order went through ("Order placed, thanks").
+  // May wait a little for the page to finish drawing; `signal` aborts the
+  // wait when the content script goes away.
+  isOrderConfirmation?(overrides: StoreOverrides | null, signal: AbortSignal): boolean | Promise<boolean>;
 }
 
 // Clicks whose effect shows up as a cart change (sidebar or /cart.js).
@@ -108,8 +116,10 @@ function sessionStorageOrNull(): Storage | null {
 export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapter): Promise<void> {
   let ui: ShadowRootContentScriptUi<OverlayHandle | null> | null = null;
   let hintUi: ShadowRootContentScriptUi<OverlayHandle> | null = null;
-  // Stops known buy clicks when this page's answer is "block" (always in dev).
-  const gate = createClickGate({ alwaysOn: DEBUG, devVerdict: DEV_VERDICT });
+  // Stops known buy clicks when this page's answer is "pause" or "block" (always with WXT_FORCE_BLOCK=1 in dev).
+  const gate = createClickGate({ enabled: ENFORCE, alwaysOn: FORCE_BLOCK, devVerdict: DEV_VERDICT });
+  // Carts the user continued past, kept across this tab's pages.
+  const carry = createOverrideCarry(sessionStorageOrNull());
   let debugUi: ShadowRootContentScriptUi<DebugPanel> | null = null;
 
   // What the debug panel shows, kept between checks.
@@ -188,28 +198,26 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   };
 
   // Every exit is logged (design invariant: every override is recorded).
-  // Continuing past an answer also lets the user's own next clicks through.
-  const approvedUntil = new Map<string, number>();
-  const approveOverride = async (verdict: Verdict, synthetic = false): Promise<boolean> => {
-    if (synthetic || verdict.action === "allow") return true;
-    const result = await browser.runtime.sendMessage({ type: "auxo:pass", decisionId: verdict.decision_id }).catch(() => ({ ok: false }));
-    const expiresAt = Date.parse(result?.expiresAt ?? "");
-    if (!result?.ok || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-      note = "Override not authorized yet. Check your sign-in or wait for the cooldown, then try again.";
-      console.info("[Auxo]", note);
+  // Continuing past an answer also lets the user's own next clicks through,
+  // and a failed or slow pass fails open (see handleOverlayExit).
+  const exitDeps: ExitDeps = {
+    requestPass: (decisionId) =>
+      browser.runtime.sendMessage<PassMessage, PassReply | undefined>({ type: "auxo:pass", decisionId }),
+    close: removeOverlay,
+    override: (decisionId, expiresAt) => {
+      gate.override(decisionId, expiresAt);
+      carry.overrode(decisionId, expiresAt);
+    },
+    saveForLater,
+    sendEvent,
+    note: (text) => {
+      note = text;
+      console.info("[Auxo]", text);
       refreshDebug();
-      return false;
-    }
-    approvedUntil.set(verdict.decision_id, expiresAt);
-    return true;
+    },
+    timeoutMs: CONTENT_TIMEOUT_MS,
   };
-  const onExit = async (verdict: Verdict, action: ExitAction) => {
-    if (action === "overrode" && !await approveOverride(verdict)) return;
-    removeOverlay();
-    if (action === "overrode") gate.override(verdict.decision_id, approvedUntil.get(verdict.decision_id));
-    if (action === "saved") saveForLater(verdict.decision_id);
-    sendEvent(buildExitEvent(verdict.decision_id, action));
-  };
+  const onExit = (verdict: Verdict, action: ExitAction) => handleOverlayExit(verdict, action, exitDeps);
 
   const removeHint = () => {
     hintUi?.remove();
@@ -219,6 +227,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   // A known buy click was stopped. Show the pause for it; after Continue,
   // the user clicks the real button again themselves (never replayed).
   const showBlocked = async (verdict: Verdict, label: string, synthetic: boolean) => {
+    if (!ENFORCE) return;
     removeOverlay();
     removeHint();
     const next = await createShadowRootUi(ctx, {
@@ -231,17 +240,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
           verdict,
           {
             onExit: async (action) => {
-              if (action === "overrode" && !await approveOverride(verdict, synthetic)) return;
-              removeOverlay();
-              if (action === "overrode") {
-                gate.override(verdict.decision_id, approvedUntil.get(verdict.decision_id));
-                void showHint(label);
-              }
               // The dev placeholder answer isn't a real decision.
-              if (!synthetic) {
-                if (action === "saved") saveForLater(verdict.decision_id);
-                sendEvent(buildExitEvent(verdict.decision_id, action));
-              }
+              await handleOverlayExit(verdict, action, exitDeps, { synthetic });
+              if (action === "overrode") void showHint(label);
               note = `click on "${label}" was stopped; user chose ${action}`;
               refreshDebug();
             },
@@ -256,6 +257,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   };
 
   const showHint = async (label: string) => {
+    if (!ENFORCE) return;
     removeHint();
     const next = await createShadowRootUi(ctx, {
       name: "auxo-hint",
@@ -271,12 +273,15 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   const show = async (verdict: Verdict, trigger?: Trigger) => {
     removeOverlay();
+    if (!ENFORCE) return; // enforcement is off
     if (DEBUG) return; // the debug panel shows the verdict instead
     if (verdict.lane === "L0") return; // silent pass
     // Putting things back is recorded, never paused. A repeat of the same
     // cart doesn't re-open a pause the user already answered. A place-order
     // click that got this far already passed the click gate.
     if (trigger && (REDUCING.has(trigger.intent) || trigger.same_cart || trigger.intent === "place_order")) return;
+    // The user already continued past this cart, maybe on an earlier page.
+    if (carry.covers(verdict.decision_id)) return;
 
     const next = await createShadowRootUi(ctx, {
       name: "auxo-overlay",
@@ -319,8 +324,9 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   }
 
   const record = (outcome: CartFlowOutcome) => {
-    // A product page re-render after an add-to-cart answer shouldn't wipe it.
-    if (outcome.status === "skipped" && outcome.reason === "product_without_click") return;
+    // A product page is never asked about, and a re-draw that wasn't sent
+    // (same cart, or the backstop) keeps the answer the page already has.
+    if (outcome.status === "skipped" && ["product_page", "same_cart", "rate_limited"].includes(outcome.reason)) return;
     switch (outcome.status) {
       case "skipped":
       case "unreadable":
@@ -328,14 +334,12 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
         cartHash = null;
         break;
       case "failed_open":
-        if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
         console.info("[Auxo] failed open:", outcome.reason);
         backend = { status: "failed", reason: outcome.reason };
         cartHash = outcome.cartHash;
         trigger = outcome.trigger;
         break;
       case "shown":
-        if (outcome.trigger.intent === "add_to_cart") miniCart.noteClickedAdd(outcome.draft);
         gate.setVerdict(outcome.verdict);
         backend = {
           status: "verdict",
@@ -353,6 +357,14 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     const result = await browser.runtime.sendMessage<DecideMessage, DecideResult>({ type: "auxo:decide", cart, trigger: t });
     // This page got its answer, so the worker shouldn't hand it to the next page.
     if (result.ok) {
+      // Runs before the answer is shown or reaches the gate. A cart the user
+      // already continued past isn't paused or blocked again (AUX-37).
+      const id = result.verdict.decision_id;
+      const until = carry.decided(id, { merchant: cart.merchant, cartHash: cart.cart_hash }, t);
+      if (until !== undefined) {
+        gate.override(id, until);
+        note = `already continued past this cart; not paused again until ${new Date(until).toLocaleTimeString()}`;
+      }
       void browser.runtime
         .sendMessage<AckMessage>({ type: "auxo:ack", decisionId: result.verdict.decision_id })
         .catch(() => {});
@@ -362,6 +374,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   const flow = createCartFlow({
     inspect: () => inspect(),
+    wholeCart: () => adapter.fullCart?.(overrides) ?? null,
     hash: hashCart,
     requestVerdict,
     show: (verdict, t) => void show(verdict, t),
@@ -369,7 +382,12 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   // The cart sidebar on product pages: removals are linked to the decision
   // about the item; + adds get a fresh decision.
+  const pending = createPendingStore(sessionStorageOrNull());
   const miniCart = createMiniCartHandler({
+    // The sidebar answered this add, so the page it might have led to must not ask again.
+    onAddAsked: (intent) => {
+      if (intent === "add_to_cart") pending.dropClick("add_to_cart");
+    },
     decisionFor: async (items) => {
       const message: DecisionForMessage = {
         type: "auxo:decision-for",
@@ -464,7 +482,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   const tracker = createTracker({
     flow,
-    pending: createPendingStore(sessionStorageOrNull()),
+    pending,
     inspect: () => inspect(),
     // Cart and checkout page edits are handled like sidebar edits.
     onCartDiff: (before, after, diff) => reportCartChange(before, after, diff, { source: "cart_page" }),
@@ -504,8 +522,22 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     refreshDebug();
   };
 
+  // The order went through: send "bought" for the purchase remembered at the
+  // "Place your order" click (the events list in the debug panel shows it).
+  const confirmOrder = async () => {
+    const placed = await Promise.resolve(adapter.isOrderConfirmation?.(overrides, ctx.signal)).catch(() => false);
+    if (!placed || ctx.isInvalid) return;
+    const result = confirmPurchase(pending, sendEvent);
+    if (result.status === "no_purchase") note = `order confirmed, but no "Place your order" click was seen in this tab`;
+    if (result.status === "no_decision") note = `order confirmed, but "bought" not sent: the purchase never got a decision`;
+    refreshDebug();
+  };
+
   step(async () => {
     await claimHandoff();
+    // Doesn't hold up the page: on the thank-you page it may wait a few
+    // seconds for Amazon to draw "Order placed".
+    void confirmOrder();
     await tracker.onLoad();
     await checkElsewhere();
   })();

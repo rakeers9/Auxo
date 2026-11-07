@@ -10,11 +10,14 @@ export interface MiniCartHandlerDeps {
   decisionFor(items: RemovedItem[]): Promise<string | null>;
   sendEvent(event: DecisionEvent): void;
   // Ask the backend about a cart edit. `draft` holds the items the edit was
-  // about (what was added, or what was taken out); the caller decides whether
+  // about (what was taken out) or, for an add, the whole cart; the caller decides whether
   // to show the answer (never for edits that lower spending). Resolves to the
   // new decision's id, or null if the backend couldn't be reached.
   decide(draft: CartDraft, trigger: Trigger): Promise<string | null>;
   pageType(): PageType;
+  // An add was asked about here (as `intent`), so a click remembered for the
+  // next page (add to cart) was answered and should be forgotten.
+  onAddAsked?(intent: TriggerIntent): void;
   now?: () => Date;
   // What happened with each change, for the debug panel.
   report?(report: SidebarReport): void;
@@ -60,8 +63,8 @@ const REDUCING = new Set<TriggerIntent>(["decrease_qty", "remove_item", "save_fo
 // - items taken out (−, delete, save for later): a decision request about the
 //   removed items, plus a "removed" event against the earlier decision that
 //   covered them, if there was one.
-// - items added (+, add to cart): a decision request about the added items,
-//   minus anything already decided at an add-to-cart click.
+// - items added (+, add to cart): a decision request about the whole cart
+//   they joined (skipped when the added items were already decided).
 // The click that caused the change labels the trigger (source "known"/"guess");
 // without one, the change itself is the trigger (source "page").
 export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandler {
@@ -148,7 +151,10 @@ export function createMiniCartHandler(deps: MiniCartHandlerDeps): MiniCartHandle
         const trigger = triggerFor(addClick, "add_to_cart", label);
         addClick = null;
         addIntent = trigger.intent;
-        await deps.decide(draftOf(remaining, after), trigger);
+        // The cart is the source of truth: an add is asked about as the whole
+        // cart it joined, not just the new lines.
+        await deps.decide(after, trigger);
+        deps.onAddAsked?.(trigger.intent);
       }
 
       deps.report?.({

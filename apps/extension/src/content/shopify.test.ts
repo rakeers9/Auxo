@@ -117,3 +117,18 @@ describe("createShopifyAdapter", () => {
     stop();
   });
 });
+
+describe("createShopifyAdapter reader failure reports", () => {
+  const doc = document;
+
+  it("passes every cart page reading to reportFailure, and nothing on other pages", async () => {
+    const reportFailure = vi.fn();
+    const cart = createShopifyAdapter({ fetch: respond(gymsharkHeadless, 404, "text/html"), location: () => new URL("https://www.gymshark.com/cart"), doc, reportFailure });
+    await cart.inspect(null);
+    expect(reportFailure).toHaveBeenCalledWith("shopify_cart", "cart", ["no Shopify cart API on this site"]);
+
+    const product = createShopifyAdapter({ fetch: respond(allbirdsCart), location: () => new URL("https://www.allbirds.com/products/x"), doc, reportFailure });
+    await product.inspect(null);
+    expect(reportFailure).toHaveBeenCalledTimes(1);
+  });
+});

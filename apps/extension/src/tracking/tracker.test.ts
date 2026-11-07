@@ -74,12 +74,21 @@ beforeEach(() => sessionStorage.clear());
 const cartPage = (items: CartDraft["items"]): PageInspection => ({ pageType: "cart", draft: draftOf(items), problems: [] });
 
 describe("createTracker", () => {
-  it("reads the product right away on an add-to-cart click on a product page", async () => {
+  it("doesn't ask at an add-to-cart click on a product page; it remembers it for the cart view", async () => {
     const t = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
 
     await t.tracker.onBuyIntent(signal("add_to_cart"));
 
-    expect(t.check).toHaveBeenCalledWith({ signal: signal("add_to_cart"), pageType: "product", at: NOW.toISOString() });
+    expect(t.check).not.toHaveBeenCalled();
+    expect(t.pending.takeClick()).toEqual({ signal: signal("add_to_cart"), pageType: "product", at: NOW.toISOString() });
+  });
+
+  it("an add the sidebar answered is forgotten, so the next page doesn't ask again", async () => {
+    const t = setup({ pageType: "product", draft: draftOf([lamp]), problems: [] });
+    await t.tracker.onBuyIntent(signal("add_to_cart"));
+
+    t.pending.dropClick("add_to_cart");
+
     expect(t.pending.takeClick()).toBeNull();
   });
 

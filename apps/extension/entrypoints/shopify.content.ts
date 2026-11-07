@@ -1,7 +1,9 @@
+import { browser } from "wxt/browser";
 import { defineContentScript } from "wxt/utils/define-content-script";
 
 import { isLikelyShopify } from "../src/cart";
 import { startStore } from "../src/content/runtime";
+import { createReadFailureNotifier } from "../src/content/read-failures";
 import { createShopifyAdapter } from "../src/content/shopify";
 
 // Runs on every site, so it ships in DEV BUILDS ONLY (see DEV_ONLY_ENTRYPOINTS
@@ -14,7 +16,13 @@ export default defineContentScript({
     if (!isLikelyShopify(document)) return;
     return startStore(
       ctx,
-      createShopifyAdapter({ fetch: (input, init) => fetch(input, init), location: () => new URL(location.href), doc: document }),
+      createShopifyAdapter({
+        fetch: (input, init) => fetch(input, init),
+        location: () => new URL(location.href),
+        doc: document,
+        // Codes only; the worker sends no Shopify hostname (AUX-47).
+        reportFailure: createReadFailureNotifier((message) => void browser.runtime.sendMessage(message).catch(() => {})),
+      }),
     );
   },
 });

@@ -1,4 +1,15 @@
-import type { Cart, CartItem, DecisionEvent, StoreOverrides, Trigger, TriggerIntent, Verdict } from "@auxo/shared";
+import type {
+  Cart,
+  CartItem,
+  DecisionEvent,
+  ReadFailureCode,
+  ReadFailurePageType,
+  Reader,
+  StoreOverrides,
+  Trigger,
+  TriggerIntent,
+  Verdict,
+} from "@auxo/shared";
 
 // Content script -> background worker: ask the API for a verdict on this cart.
 export interface DecideMessage {
@@ -137,4 +148,14 @@ export interface CartChange {
 
 export interface CartLoadResult {
   change: CartChange | null;
+}
+
+// Content script -> worker: a reader couldn't read this page (AUX-47). Codes
+// only (src/cart/codes.ts), never the problem text. The worker adds the store
+// host, extension version and day, rate limits, and posts it; no answer.
+export interface ReadFailureMessage {
+  type: "auxo:read-failure";
+  reader: Reader;
+  page_type: ReadFailurePageType;
+  codes: ReadFailureCode[];
 }

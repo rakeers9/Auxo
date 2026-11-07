@@ -15,6 +15,7 @@ import productHtml from "./__fixtures__/amazon-product.html?raw";
 import addedSrc from "./added.ts?raw";
 import amazonSrc from "./amazon.ts?raw";
 import checkoutSrc from "./checkout.ts?raw";
+import confirmationSrc from "./confirmation.ts?raw";
 import inspectSrc from "./inspect.ts?raw";
 import minicartSrc from "./minicart.ts?raw";
 import productSrc from "./product.ts?raw";
@@ -53,8 +54,11 @@ describe("selector overrides change what is read", () => {
     const doc = parse(productHtml);
     const price = doc.querySelector("form#addToCart #corePrice_feature_div .apex-pricetopay-value .a-offscreen")!;
     price.classList.replace("a-offscreen", "price-v2");
+    // The other layers (digit spans, the price under the title) would still
+    // read it, so take them away to leave only the exact selector.
+    doc.querySelectorAll(".a-price-whole").forEach((e) => e.remove());
 
-    expect(readAmazonProduct(doc, PRODUCT_URL).problems).toEqual(["no price in the buy box"]);
+    expect(readAmazonProduct(doc, PRODUCT_URL).problems[0]).toContain("buy box: selector matched nothing");
     const override = { "product.buyBoxPrice": "form#addToCart #corePrice_feature_div .price-v2" };
     expect(readAmazonProduct(doc, PRODUCT_URL, override).draft?.total_minor).toBe(4598);
   });
@@ -114,7 +118,15 @@ describe("a bad config never breaks reading", () => {
 });
 
 describe("AMAZON_SELECTORS covers every selector the readers use", () => {
-  const sources = { added: addedSrc, amazon: amazonSrc, checkout: checkoutSrc, inspect: inspectSrc, minicart: minicartSrc, product: productSrc };
+  const sources = {
+    added: addedSrc,
+    amazon: amazonSrc,
+    checkout: checkoutSrc,
+    confirmation: confirmationSrc,
+    inspect: inspectSrc,
+    minicart: minicartSrc,
+    product: productSrc,
+  };
 
   it.each(Object.entries(sources))("%s.ts has no hardcoded selector in a DOM query", (_name, src) => {
     // Any querySelector / querySelectorAll / closest / matches called with a literal.
