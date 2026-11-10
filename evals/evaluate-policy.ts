@@ -59,7 +59,7 @@ async function main(): Promise<void> {
         ? [{ id: randomUUID(), ...scenario.rule, rule_type: scenario.rule.rule_type as Rule["rule_type"], enabled: true, created_at: now, updated_at: now }]
         : [];
       const budgets: Budget[] = scenario.budget
-        ? [{ id: randomUUID(), currency: cart.currency, ...scenario.budget, period_start: "2026-10-01", period_end: "2026-10-31", created_at: now, updated_at: now }]
+        ? [{ id: randomUUID(), currency: cart.currency, ...scenario.budget, period_start: "2026-10-01", period_end: "2026-10-31", period_days: 31, repeats: false, created_at: now, updated_at: now }]
         : [];
       const actual = scenario.trigger
         ? (

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { z } from "zod";
 import {
   BudgetSchema,
   RuleSchema,
@@ -10,10 +11,16 @@ import {
   type UpdateRule,
 } from "@auxo/shared";
 
+import { budgetOn, stopRepeating, utcDate, type StoredBudget } from "../services/budget-period.js";
 import type { SettingsRepository } from "./settings-repository.js";
 
 const ruleColumns = "id,name,rule_type,configuration,enabled,created_at,updated_at";
-const budgetColumns = "id,currency,limit_minor,spent_minor,period_start,period_end,created_at,updated_at";
+const budgetColumns = "id,currency,limit_minor,spent_minor,spent_period_start,period_start,period_end,repeats,created_at,updated_at";
+
+// A budgets row as stored: the booked period, not the current cycle.
+const StoredBudgetSchema = BudgetSchema.omit({ period_days: true }).extend({
+  spent_period_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+});
 
 export interface InvalidSettingsRow {
   table: "rules" | "budgets";
@@ -36,6 +43,8 @@ export class SupabaseSettingsRepository implements SettingsRepository {
   public constructor(
     private readonly client: SupabaseClient,
     private readonly onInvalidRow: InvalidSettingsRowLogger = defaultLogger,
+    // The clock that picks a repeating budget's current cycle.
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   public async listRules(userId: string): Promise<Rule[]> {
@@ -65,19 +74,30 @@ export class SupabaseSettingsRepository implements SettingsRepository {
   public async listBudgets(userId: string): Promise<Budget[]> {
     const { data, error } = await this.client.from("budgets").select(budgetColumns).eq("user_id", userId).order("period_start", { ascending: false });
     if (error) throw new Error("Unable to list budgets.", { cause: error });
-    return this.parseRows("budgets", data ?? [], parseBudgetRow);
+    const today = utcDate(this.now());
+    return this.parseRows("budgets", data ?? [], parseBudgetRow).map((stored) => budgetOn(stored, today));
   }
 
   public async createBudget(userId: string, input: CreateBudget): Promise<Budget> {
     const { data, error } = await this.client.from("budgets").insert({ user_id: userId, ...input }).select(budgetColumns).single();
     if (error) throw new Error("Unable to create budget.", { cause: error });
-    return requireRow("budget", parseBudgetRow(data));
+    return budgetOn(requireRow("budget", parseBudgetRow(data)), utcDate(this.now()));
   }
 
+  // Turning `repeats` off reads the row first, to store its current cycle as
+  // the budget's one remaining period.
   public async updateBudget(userId: string, budgetId: string, input: UpdateBudget): Promise<Budget | null> {
-    const { data, error } = await this.client.from("budgets").update(input).eq("id", budgetId).eq("user_id", userId).select(budgetColumns).maybeSingle();
+    const today = utcDate(this.now());
+    let changes: Record<string, unknown> = { ...input };
+    if (input.repeats === false) {
+      const { data, error } = await this.client.from("budgets").select(budgetColumns).eq("id", budgetId).eq("user_id", userId).maybeSingle();
+      if (error) throw new Error("Unable to update budget.", { cause: error });
+      if (!data) return null;
+      changes = { ...changes, ...stopRepeating(requireRow("budget", parseBudgetRow(data)), today) };
+    }
+    const { data, error } = await this.client.from("budgets").update(changes).eq("id", budgetId).eq("user_id", userId).select(budgetColumns).maybeSingle();
     if (error) throw new Error("Unable to update budget.", { cause: error });
-    return data ? requireRow("budget", parseBudgetRow(data)) : null;
+    return data ? budgetOn(requireRow("budget", parseBudgetRow(data)), today) : null;
   }
 
   public async deleteBudget(userId: string, budgetId: string): Promise<boolean> {
@@ -114,9 +134,9 @@ export function parseRuleRow(row: unknown): ParseResult<Rule> {
   return parsed.success ? { success: true, data: parsed.data } : { success: false, issues: describeIssues(parsed.error.issues) };
 }
 
-export function parseBudgetRow(row: unknown): ParseResult<Budget> {
+export function parseBudgetRow(row: unknown): ParseResult<StoredBudget> {
   if (!isRecord(row)) return { success: false, issues: ["(row): not an object"] };
-  const parsed = BudgetSchema.safeParse({
+  const parsed = StoredBudgetSchema.safeParse({
     ...row,
     limit_minor: integer(row.limit_minor),
     spent_minor: integer(row.spent_minor),

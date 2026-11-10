@@ -214,3 +214,86 @@ describe("spend tracking from bought events", () => {
     expect((await budgets(instance)).get(budget.id)).toBe(0);
   });
 });
+
+describe("repeating budgets", () => {
+  // The clock is 2026-10-15. The booked period Oct 11-15 repeats every 5 days.
+  const booked = { currency: "USD", limit_minor: 10_000, period_start: "2026-10-11", period_end: "2026-10-15", repeats: true };
+
+  async function listed(instance: App): Promise<Budget[]> {
+    const response = await instance.inject({ method: "GET", url: "/v1/budgets", headers: auth("user-a") });
+    return (response.json() as { budgets: Budget[] }).budgets.map((budget) => BudgetSchema.parse(budget));
+  }
+
+  it("returns the cycle length and the current cycle", async () => {
+    const instance = app();
+    const created = await createBudget(instance, booked);
+    expect(created).toMatchObject({ period_start: "2026-10-11", period_end: "2026-10-15", period_days: 5, repeats: true });
+
+    vi.setSystemTime(new Date("2026-10-23T12:00:00.000Z"));
+    expect(await listed(instance)).toEqual([
+      expect.objectContaining({ period_start: "2026-10-21", period_end: "2026-10-25", period_days: 5, spent_minor: 0 }),
+    ]);
+  });
+
+  it("defaults to not repeating", async () => {
+    const instance = app();
+    const created = await createBudget(instance, { ...booked, repeats: undefined });
+    expect(created.repeats).toBe(false);
+
+    vi.setSystemTime(new Date("2026-10-23T12:00:00.000Z"));
+    expect((await listed(instance))[0]).toMatchObject({ period_start: "2026-10-11", period_end: "2026-10-15" });
+  });
+
+  it("resets spending at the start of each cycle, and the decision sees the reset", async () => {
+    const instance = app();
+    const budget = await createBudget(instance, booked);
+
+    const first = await decide(instance, 8_000);
+    expect((await sendEvent(instance, first.decision_id, "bought")).statusCode).toBe(201);
+    expect((await budgets(instance)).get(budget.id)).toBe(8_000);
+    // 8,000 spent + 4,000 = over the limit in this cycle.
+    expect((await decide(instance, 4_000)).lane).toBe("L4");
+
+    // The next cycle (Oct 16-20) starts with nothing spent.
+    vi.setSystemTime(new Date("2026-10-16T09:00:00.000Z"));
+    expect((await budgets(instance)).get(budget.id)).toBe(0);
+    const next = await decide(instance, 4_000);
+    expect(next.lane).toBe("L0");
+    expect(next.context.budget).toEqual({ limit_minor: 10_000, spent_minor: 0, projected_minor: 4_000, would_exceed: false });
+
+    expect((await sendEvent(instance, next.decision_id, "bought", "2026-10-16T09:05:00.000Z")).statusCode).toBe(201);
+    expect((await budgets(instance)).get(budget.id)).toBe(4_000);
+  });
+
+  it("doesn't count a late bought event toward the new cycle", async () => {
+    const instance = app();
+    const budget = await createBudget(instance, booked);
+    const early = await decide(instance, 2_000);
+    vi.setSystemTime(new Date("2026-10-17T12:00:00.000Z"));
+    const late = await decide(instance, 3_000);
+
+    expect((await sendEvent(instance, late.decision_id, "bought", "2026-10-17T12:05:00.000Z")).statusCode).toBe(201);
+    // Placed on Oct 15 (the previous cycle), reported after Oct 17's purchase.
+    expect((await sendEvent(instance, early.decision_id, "bought", "2026-10-15T12:05:00.000Z")).statusCode).toBe(201);
+
+    expect((await budgets(instance)).get(budget.id)).toBe(3_000);
+  });
+
+  it("turns repeating on and off, ending after the current cycle", async () => {
+    const instance = app();
+    const budget = await createBudget(instance, { ...booked, repeats: false });
+    const decision = await decide(instance, 1_000);
+    expect((await sendEvent(instance, decision.decision_id, "bought")).statusCode).toBe(201);
+
+    const on = await instance.inject({ method: "PATCH", url: `/v1/budgets/${budget.id}`, headers: auth("user-a"), payload: { repeats: true } });
+    expect(BudgetSchema.parse(on.json())).toMatchObject({ repeats: true, spent_minor: 1_000 });
+
+    vi.setSystemTime(new Date("2026-10-27T12:00:00.000Z"));
+    const off = await instance.inject({ method: "PATCH", url: `/v1/budgets/${budget.id}`, headers: auth("user-a"), payload: { repeats: false } });
+    expect(BudgetSchema.parse(off.json())).toMatchObject({ repeats: false, period_start: "2026-10-26", period_end: "2026-10-30", spent_minor: 0 });
+
+    // It stays on its last cycle once that has passed.
+    vi.setSystemTime(new Date("2026-11-04T12:00:00.000Z"));
+    expect((await listed(instance))[0]).toMatchObject({ period_start: "2026-10-26", period_end: "2026-10-30" });
+  });
+});

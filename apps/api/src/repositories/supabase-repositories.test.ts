@@ -227,8 +227,10 @@ describe("SupabaseSettingsRepository", () => {
     currency: "USD",
     limit_minor: "10000",
     spent_minor: 2500,
+    spent_period_start: null,
     period_start: "2026-10-01",
     period_end: "2026-10-31",
+    repeats: false,
     created_at: "2026-10-01T12:00:00.123456+00:00",
     updated_at: "2026-10-02T12:00:00+00:00",
   };
@@ -273,5 +275,58 @@ describe("SupabaseSettingsRepository", () => {
       period_start: "2026-10-01",
       period_end: "2026-10-31",
     })).rejects.toThrow("The stored budget is invalid");
+  });
+
+  // A Nov 1-5 budget that repeats; on Nov 12 its cycle is Nov 11-15.
+  const repeatingRow = {
+    ...budgetRow,
+    spent_minor: 4_000,
+    spent_period_start: "2026-11-11",
+    period_start: "2026-11-01",
+    period_end: "2026-11-05",
+    repeats: true,
+  };
+  const nov12 = () => new Date("2026-11-12T12:00:00.000Z");
+
+  it("lists a repeating budget as its current cycle, and selects the stored columns", async () => {
+    const { client, calls } = fakeSupabase([{ data: [repeatingRow, { ...repeatingRow, id: "50000000-0000-4000-8000-000000000003", spent_period_start: "2026-11-06" }] }]);
+    const listed = await new SupabaseSettingsRepository(client, vi.fn(), nov12).listBudgets(userId);
+
+    expect(listed.map(({ period_start, period_end, period_days, spent_minor }) => ({ period_start, period_end, period_days, spent_minor }))).toEqual([
+      { period_start: "2026-11-11", period_end: "2026-11-15", period_days: 5, spent_minor: 4_000 },
+      // Spending from the Nov 6-10 cycle doesn't count on Nov 12.
+      { period_start: "2026-11-11", period_end: "2026-11-15", period_days: 5, spent_minor: 0 },
+    ]);
+    expect(String(opsOf(calls[0], "select")[0]?.[0])).toContain("repeats");
+    expect(String(opsOf(calls[0], "select")[0]?.[0])).toContain("spent_period_start");
+  });
+
+  it("stores the current cycle when a budget stops repeating", async () => {
+    const stopped = { ...repeatingRow, period_start: "2026-11-11", period_end: "2026-11-15", repeats: false };
+    const { client, calls } = fakeSupabase([{ data: repeatingRow }, { data: stopped }]);
+    const updated = await new SupabaseSettingsRepository(client, vi.fn(), nov12).updateBudget(userId, budgetRow.id, { repeats: false });
+
+    expect(updated).toMatchObject({ period_start: "2026-11-11", period_end: "2026-11-15", repeats: false, spent_minor: 4_000 });
+    expect(opsOf(calls[1], "update")).toEqual([[{
+      repeats: false,
+      period_start: "2026-11-11",
+      period_end: "2026-11-15",
+      spent_minor: 4_000,
+      spent_period_start: "2026-11-11",
+    }]]);
+    expect(opsOf(calls[1], "eq")).toEqual([["id", budgetRow.id], ["user_id", userId]]);
+  });
+
+  it("returns null when stopping a budget that isn't the user's", async () => {
+    const { client, remaining } = fakeSupabase([{ data: null }]);
+    expect(await new SupabaseSettingsRepository(client, vi.fn(), nov12).updateBudget(userId, budgetRow.id, { repeats: false })).toBeNull();
+    expect(remaining()).toBe(0);
+  });
+
+  it("updates the limit or turns repeating on without reading first", async () => {
+    const { client, calls } = fakeSupabase([{ data: repeatingRow }]);
+    await new SupabaseSettingsRepository(client, vi.fn(), nov12).updateBudget(userId, budgetRow.id, { limit_minor: 50_000, repeats: true });
+    expect(calls).toHaveLength(1);
+    expect(opsOf(calls[0], "update")).toEqual([[{ limit_minor: 50_000, repeats: true }]]);
   });
 });

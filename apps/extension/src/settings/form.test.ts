@@ -123,11 +123,16 @@ describe("budgets", () => {
 
   it("builds a budget the API accepts and refuses bad input", () => {
     const budget = budgetFrom("300", "2026-11-01", "2026-11-30");
-    expect(budget).toEqual({ currency: "USD", limit_minor: 30_000, period_start: "2026-11-01", period_end: "2026-11-30" });
+    expect(budget).toEqual({ currency: "USD", limit_minor: 30_000, period_start: "2026-11-01", period_end: "2026-11-30", repeats: false });
     expect(CreateBudgetSchema.safeParse(budget).success).toBe(true);
+    const repeating = budgetFrom("50", "2026-11-11", "2026-11-15", true);
+    expect(repeating).toMatchObject({ limit_minor: 5_000, repeats: true });
+    expect(CreateBudgetSchema.safeParse(repeating).success).toBe(true);
     expect(budgetFrom("0", "2026-11-01", "2026-11-30")).toBeNull();
     expect(budgetFrom("300", "2026-11-30", "2026-11-01")).toBeNull();
     expect(budgetFrom("300", "", "2026-11-30")).toBeNull();
+    // The calendar's end is null while the user is still picking it.
+    expect(budgetFrom("300", "2026-11-01", null)).toBeNull();
   });
 
   it("summarizes spending against the limit", () => {
@@ -139,9 +144,30 @@ describe("budgets", () => {
         spent_minor: 12_050,
         period_start: "2026-11-01",
         period_end: "2026-11-30",
+        period_days: 30,
+        repeats: false,
         created_at: "2026-11-06T12:00:00.000Z",
         updated_at: "2026-11-06T12:00:00.000Z",
       }),
-    ).toBe("$120.50 of $300.00 spent, 2026-11-01 to 2026-11-30");
+    ).toBe("$120.50 of $300.00 spent, Nov 1 to Nov 30");
+  });
+
+  it("summarizes a repeating limit for its current cycle, with the year only when it isn't this year", () => {
+    const budget = {
+      id: "22222222-2222-4222-8222-222222222222",
+      currency: "USD",
+      limit_minor: 30_000,
+      spent_minor: 5_000,
+      period_start: "2026-11-11",
+      period_end: "2026-11-15",
+      period_days: 5,
+      repeats: true,
+      created_at: "2026-11-06T12:00:00.000Z",
+      updated_at: "2026-11-06T12:00:00.000Z",
+    };
+    expect(budgetSummary(budget, 2026)).toBe("$50.00 of $300.00 spent this cycle, Nov 11 to Nov 15, repeats every 5 days");
+    expect(budgetSummary({ ...budget, period_days: 7 }, 2025)).toBe(
+      "$50.00 of $300.00 spent this cycle, Nov 11, 2026 to Nov 15, 2026, repeats every week",
+    );
   });
 });

@@ -9,6 +9,7 @@ import {
 } from "@auxo/shared";
 
 import { formatMoney } from "../wishlist/view";
+import { repeatPhrase, shortDate } from "./budget-calendar";
 
 // What each lane does, in plain words. The cooldowns match LANE_POLICY in
 // apps/api/src/services/policy-engine.ts; change both together.
@@ -129,15 +130,21 @@ export function monthRange(now: Date): { start: string; end: string } {
   return { start: isoDate(year, month, 1), end: isoDate(year, month, lastDay) };
 }
 
-export function budgetFrom(amount: string, start: string, end: string): CreateBudget | null {
+// `repeats`: the same number of days starts again after `end`, with spending
+// back at 0 (apps/api/src/services/budget-period.ts).
+export function budgetFrom(amount: string, start: string, end: string | null, repeats = false): CreateBudget | null {
   const limit = parseDollars(amount);
   const date = /^\d{4}-\d{2}-\d{2}$/;
-  if (limit === null || limit === 0 || !date.test(start) || !date.test(end) || end < start) return null;
-  return { currency: "USD", limit_minor: limit, period_start: start, period_end: end };
+  if (limit === null || limit === 0 || end === null || !date.test(start) || !date.test(end) || end < start) return null;
+  return { currency: "USD", limit_minor: limit, period_start: start, period_end: end, repeats };
 }
 
-export function budgetSummary(budget: Budget): string {
+// The API returns a repeating budget for its current cycle.
+export function budgetSummary(budget: Budget, thisYear?: number): string {
   const spent = formatMoney(budget.spent_minor, budget.currency);
   const limit = formatMoney(budget.limit_minor, budget.currency);
-  return `${spent} of ${limit} spent, ${budget.period_start} to ${budget.period_end}`;
+  const dates = `${shortDate(budget.period_start, thisYear)} to ${shortDate(budget.period_end, thisYear)}`;
+  return budget.repeats
+    ? `${spent} of ${limit} spent this cycle, ${dates}, repeats ${repeatPhrase(budget.period_days)}`
+    : `${spent} of ${limit} spent, ${dates}`;
 }

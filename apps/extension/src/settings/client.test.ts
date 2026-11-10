@@ -20,6 +20,8 @@ const BUDGET = {
   spent_minor: 0,
   period_start: "2026-11-01",
   period_end: "2026-11-30",
+  period_days: 30,
+  repeats: false,
   created_at: "2026-11-06T12:00:00.000Z",
   updated_at: "2026-11-06T12:00:00.000Z",
 };

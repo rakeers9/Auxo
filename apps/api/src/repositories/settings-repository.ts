@@ -8,6 +8,8 @@ import type {
 } from "@auxo/shared";
 import { randomUUID } from "node:crypto";
 
+import { budgetOn, chargeBudget, stopRepeating, utcDate, type StoredBudget } from "../services/budget-period.js";
+
 export interface SettingsRepository {
   listRules(userId: string): Promise<Rule[]>;
   createRule(userId: string, input: CreateRule): Promise<Rule>;
@@ -22,7 +24,8 @@ export interface SettingsRepository {
 export interface PurchaseSpend {
   currency: string;
   amountMinor: number;
-  // YYYY-MM-DD (UTC) of the purchase; budgets whose period contains it are charged.
+  // YYYY-MM-DD (UTC) of the purchase. It's charged to the cycle of each
+  // budget that contains it (see services/budget-period.ts).
   occurredOn: string;
 }
 
@@ -33,9 +36,23 @@ export interface SpendLedger {
   recordSpend(userId: string, spend: PurchaseSpend): Promise<void>;
 }
 
+export interface InMemorySettingsRepositoryOptions {
+  // The clock that picks a repeating budget's current cycle.
+  now?: () => Date;
+}
+
 export class InMemorySettingsRepository implements SettingsRepository, SpendLedger {
   private readonly rules = new Map<string, { userId: string; value: Rule }>();
-  private readonly budgets = new Map<string, { userId: string; value: Budget }>();
+  private readonly budgets = new Map<string, { userId: string; value: StoredBudget }>();
+  private readonly now: () => Date;
+
+  public constructor(options: InMemorySettingsRepositoryOptions = {}) {
+    this.now = options.now ?? (() => new Date());
+  }
+
+  private today(): string {
+    return utcDate(this.now());
+  }
 
   public async listRules(userId: string): Promise<Rule[]> {
     return [...this.rules.values()].filter((row) => row.userId === userId).map((row) => row.value);
@@ -64,20 +81,26 @@ export class InMemorySettingsRepository implements SettingsRepository, SpendLedg
   }
 
   public async listBudgets(userId: string): Promise<Budget[]> {
-    return [...this.budgets.values()].filter((row) => row.userId === userId).map((row) => row.value);
+    const today = this.today();
+    return [...this.budgets.values()].filter((row) => row.userId === userId).map((row) => budgetOn(row.value, today));
   }
 
   public async createBudget(userId: string, input: CreateBudget): Promise<Budget> {
     const now = new Date().toISOString();
-    const value = {
+    const value: StoredBudget = {
       id: randomUUID(),
-      ...input,
+      currency: input.currency,
+      limit_minor: input.limit_minor,
       spent_minor: 0,
+      spent_period_start: null,
+      period_start: input.period_start,
+      period_end: input.period_end,
+      repeats: input.repeats ?? false,
       created_at: now,
       updated_at: now,
     };
     this.budgets.set(value.id, { userId, value });
-    return value;
+    return budgetOn(value, this.today());
   }
 
   public async updateBudget(
@@ -87,11 +110,15 @@ export class InMemorySettingsRepository implements SettingsRepository, SpendLedg
   ): Promise<Budget | null> {
     const row = this.budgets.get(budgetId);
     if (!row || row.userId !== userId) return null;
-    const changes = Object.fromEntries(
-      Object.entries(input).filter(([, value]) => value !== undefined),
-    ) as Partial<Budget>;
-    row.value = { ...row.value, ...changes, updated_at: new Date().toISOString() };
-    return row.value;
+    const today = this.today();
+    row.value = {
+      ...row.value,
+      ...(input.limit_minor !== undefined ? { limit_minor: input.limit_minor } : {}),
+      ...(input.repeats === true ? { repeats: true } : {}),
+      ...(input.repeats === false ? stopRepeating(row.value, today) : {}),
+      updated_at: new Date().toISOString(),
+    };
+    return budgetOn(row.value, today);
   }
 
   public async deleteBudget(userId: string, budgetId: string): Promise<boolean> {
@@ -101,18 +128,9 @@ export class InMemorySettingsRepository implements SettingsRepository, SpendLedg
 
   public async recordSpend(userId: string, spend: PurchaseSpend): Promise<void> {
     for (const row of this.budgets.values()) {
-      if (
-        row.userId === userId &&
-        row.value.currency === spend.currency &&
-        row.value.period_start <= spend.occurredOn &&
-        row.value.period_end >= spend.occurredOn
-      ) {
-        row.value = {
-          ...row.value,
-          spent_minor: row.value.spent_minor + spend.amountMinor,
-          updated_at: new Date().toISOString(),
-        };
-      }
+      if (row.userId !== userId || row.value.currency !== spend.currency) continue;
+      const charged = chargeBudget(row.value, spend.amountMinor, spend.occurredOn);
+      if (charged) row.value = { ...row.value, ...charged, updated_at: new Date().toISOString() };
     }
   }
 }
