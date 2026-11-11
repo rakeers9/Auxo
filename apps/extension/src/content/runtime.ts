@@ -209,6 +209,8 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       carry.overrode(decisionId, expiresAt);
     },
     saveForLater,
+    // The store's home page: away from the cart and checkout.
+    leave: () => location.assign(`${location.origin}/`),
     sendEvent,
     note: (text) => {
       note = text;

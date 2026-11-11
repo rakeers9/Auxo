@@ -24,6 +24,8 @@ export interface ExitDeps {
   // none, until the page gets a different answer.
   override(decisionId: string, expiresAt?: number): void;
   saveForLater(decisionId: string): void;
+  // Takes the user off the page (Leave and Save for later both mean "not now").
+  leave(): void;
   sendEvent(event: DecisionEvent): void;
   // A line for the debug panel.
   note(text: string): void;
@@ -58,9 +60,12 @@ export async function handleOverlayExit(
   }
   deps.close();
   if (action === "overrode") deps.override(verdict.decision_id, expiresAt);
-  if (synthetic) return;
-  if (action === "saved") deps.saveForLater(verdict.decision_id);
-  deps.sendEvent(buildExitEvent(verdict.decision_id, action));
+  if (!synthetic) {
+    if (action === "saved") deps.saveForLater(verdict.decision_id);
+    deps.sendEvent(buildExitEvent(verdict.decision_id, action));
+  }
+  // Last, after the messages above are on their way: navigating ends this page.
+  if (action === "left" || action === "saved") deps.leave();
 }
 
 // The pass's expiry (ms), or undefined when there's no usable pass in time.

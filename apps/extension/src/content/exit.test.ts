@@ -19,6 +19,7 @@ function deps(requestPass: ExitDeps["requestPass"]) {
     close: vi.fn(),
     override: vi.fn(),
     saveForLater: vi.fn(),
+    leave: vi.fn(),
     sendEvent: vi.fn(),
     note: vi.fn(),
     timeoutMs: 3_000,
@@ -105,6 +106,28 @@ describe("handleOverlayExit", () => {
     expect(d.requestPass).not.toHaveBeenCalled();
     expect(d.close).toHaveBeenCalledOnce();
     expect(d.override).toHaveBeenCalledWith(block.decision_id, undefined);
+    expect(d.sendEvent).not.toHaveBeenCalled();
+  });
+
+  it("takes the user off the page after Leave or Save for later, once the messages are sent", async () => {
+    for (const action of ["left", "saved"] as const) {
+      const d = deps(passUntil("2026-11-06T12:10:00Z"));
+      await handleOverlayExit(block, action, d);
+      expect(d.leave).toHaveBeenCalledOnce();
+      expect(d.leave.mock.invocationCallOrder[0]).toBeGreaterThan(d.sendEvent.mock.invocationCallOrder[0]!);
+    }
+  });
+
+  it("stays on the page after Continue", async () => {
+    const d = deps(passUntil("2026-11-06T12:10:00Z"));
+    await handleOverlayExit(block, "overrode", d);
+    expect(d.leave).not.toHaveBeenCalled();
+  });
+
+  it("still leaves for the dev placeholder answer, sending nothing", async () => {
+    const d = deps(passUntil("2026-11-06T12:10:00Z"));
+    await handleOverlayExit(block, "left", d, { synthetic: true });
+    expect(d.leave).toHaveBeenCalledOnce();
     expect(d.sendEvent).not.toHaveBeenCalled();
   });
 });

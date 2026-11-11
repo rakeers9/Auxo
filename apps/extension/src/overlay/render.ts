@@ -2,7 +2,7 @@ import type { AlternativeStrategy, Verdict } from "@auxo/shared";
 
 import type { ExitAction } from "../messages";
 import { OVERLAY_CSS } from "./styles";
-import { CLICK_PAUSE_COPY, resolveTemplate, type OverlayTemplate } from "./templates";
+import { CLICK_PAUSE_COPY, MODEL_BLOCK_COPY, resolveTemplate, type OverlayTemplate } from "./templates";
 
 export interface OverlayHandlers {
   onExit(action: ExitAction): void;
@@ -41,7 +41,7 @@ export function renderOverlay(
   handlers: OverlayHandlers,
   options: OverlayOptions = {},
 ): OverlayHandle | null {
-  const template = resolveTemplate(verdict);
+  const template = withModelCopy(resolveTemplate(verdict), verdict);
   const clicked = options.clicked === undefined ? undefined : cleanLabel(options.clicked);
   if (clicked === undefined && template.kind === "none") return null;
 
@@ -132,6 +132,19 @@ const BUDGET_REASONS: Partial<Record<string, string>> = {
   "budget.warning": "This would use most of your spending limit.",
 };
 
+// True when the context shows the user's own rules or budgets didn't set the
+// lane (the decision model raised it). Unknown without a context.
+export function setByModel(verdict: Verdict): boolean {
+  const factors = verdict.context?.decisive_factors;
+  if (!factors) return false;
+  return !factors.some((factor) => (factor.source === "rule" || factor.source === "budget") && factor.lane === verdict.lane);
+}
+
+function withModelCopy(template: OverlayTemplate, verdict: Verdict): OverlayTemplate {
+  const copy = setByModel(verdict) ? MODEL_BLOCK_COPY[template.lane] : undefined;
+  return copy ? { ...template, ...copy } : template;
+}
+
 // One line saying what set the lane: the user's own rule, else their budget.
 // Undefined when neither did (the model's own pick, the stub, no context).
 export function reasonLine(verdict: Verdict): string | undefined {
@@ -221,20 +234,26 @@ function showBanner({ doc, container, stops }: MountContext, content: HTMLElemen
   container.append(banner);
 }
 
-// L2: a pause screen. Continue unlocks when the cooldown ends.
+// L2: a pause screen. Leave and Save for later work right away; Continue
+// unlocks when the cooldown ends. The pause covers the page, so it must never
+// leave the user with nothing to do but wait.
 function renderPause(view: View, cooldownSeconds: number): void {
   const { doc, stops } = view;
-  const { dialog, countdown, actions } = dialogShell(view);
+  const { countdown, actions } = dialogShell(view);
   const exit = exitOnce(view, actions);
 
+  const leave = button(doc, "Leave", "leave");
+  leave.addEventListener("click", () => exit("left"));
+  const save = button(doc, "Save for later", "save");
+  save.addEventListener("click", () => exit("saved"));
   const cont = button(doc, "Continue to checkout", "continue", "auxo-button-primary");
   cont.addEventListener("click", () => exit("overrode"));
-  actions.append(cont);
+  actions.append(leave, save, cont);
 
   stops.push(
     startCooldown(cooldownSeconds, cont, countdown, (s) => `You can continue in ${formatSeconds(s)}`, "You can continue now."),
   );
-  dialog.dataset.autofocus = "";
+  leave.dataset.autofocus = "";
 }
 
 // L3/L4, or any lane when a click was stopped: a full block with three exits.

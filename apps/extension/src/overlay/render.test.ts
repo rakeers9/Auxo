@@ -2,7 +2,7 @@ import type { Lane, Verdict } from "@auxo/shared";
 import { VerdictSchema } from "@auxo/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatSeconds, ideaFor, reasonLine, renderOverlay, type OverlayHandle } from "./render";
+import { formatSeconds, ideaFor, reasonLine, renderOverlay, setByModel, type OverlayHandle } from "./render";
 import { LANE_TEMPLATES } from "./templates";
 
 const COOLDOWN: Record<Lane, number> = { L0: 0, L1: 0, L2: 60, L3: 300, L4: 900 };
@@ -105,7 +105,20 @@ describe("renderOverlay", () => {
       handle = renderOverlay(root, verdict("L2"), { onExit });
       const dialog = root.querySelector('[role="dialog"]');
       expect(dialog?.getAttribute("aria-modal")).toBe("true");
-      expect(root.querySelectorAll("button")).toHaveLength(1);
+    });
+
+    it("never leaves the user with only a disabled button: Leave and Save for later work right away", () => {
+      handle = renderOverlay(root, verdict("L2"), { onExit });
+      expect([...root.querySelectorAll("button")].map((b) => b.dataset.action)).toEqual(["leave", "save", "continue"]);
+      expect(btn(root, "continue").disabled).toBe(true);
+      expect(btn(root, "leave").disabled).toBe(false);
+      expect(btn(root, "save").disabled).toBe(false);
+      expect(root.activeElement).toBe(btn(root, "leave"));
+
+      btn(root, "save").click();
+      btn(root, "leave").click();
+      expect(onExit).toHaveBeenCalledTimes(1);
+      expect(onExit).toHaveBeenCalledWith("saved");
     });
 
     it("counts down and enables continue only after the cooldown", () => {
@@ -272,16 +285,17 @@ describe("renderOverlay", () => {
       expect(focusedAction(root)).toBe("go-anyway");
     });
 
-    it("L2: Tab keeps focus on the dialog while continue is locked, then reaches it", () => {
+    it("L2: Tab skips continue while it's locked, then reaches it", () => {
       handle = renderOverlay(root, verdict("L2"), { onExit });
-      const dialog = root.querySelector('[role="dialog"]');
-      expect(root.activeElement).toBe(dialog);
+      expect(focusedAction(root)).toBe("leave");
       press(root, "Tab");
-      expect(root.activeElement).toBe(dialog);
+      expect(focusedAction(root)).toBe("save");
+      press(root, "Tab");
+      expect(focusedAction(root)).toBe("leave");
 
       vi.advanceTimersByTime(COOLDOWN.L2 * 1000);
       press(root, "Tab");
-      expect(focusedAction(root)).toBe("continue");
+      expect(focusedAction(root)).toBe("save");
       press(root, "Tab");
       expect(focusedAction(root)).toBe("continue");
     });
@@ -476,5 +490,55 @@ describe("suggesting an alternative", () => {
     const shown = renderOverlay(root, withIdea("L2", undefined), { onExit: vi.fn() });
     expect(root.querySelector('[data-role="idea"]')).toBeNull();
     shown?.destroy();
+  });
+});
+
+describe("block copy when the decision model set the lane", () => {
+  type Factor = NonNullable<Verdict["context"]>["decisive_factors"][number];
+  function withFactors(lane: Lane, factors: Factor[]): Verdict {
+    return verdict(lane, {
+      context: {
+        decision_id: "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f",
+        cart_summary: { merchant: "amazon.com", total_minor: 49_999, currency: "USD", item_count: 1 },
+        budget: null,
+        matched_rules: [],
+        model_signal: null,
+        decisive_factors: factors,
+        available_actions: ["leave", "save_for_later", "override_after_cooldown"],
+      },
+    });
+  }
+  const bodyOf = (root: ShadowRoot) => root.querySelector(".auxo-body")?.textContent;
+
+  it("doesn't claim the user set limits when the model raised the lane", () => {
+    for (const lane of ["L3", "L4"] as const) {
+      const root = mount();
+      const v = withFactors(lane, [{ code: "no_policy_match", source: "policy", lane: "L0" }, { code: "model.escalation", source: "model", lane }]);
+      expect(setByModel(v)).toBe(true);
+      const shown = renderOverlay(root, v, { onExit: vi.fn() });
+      expect(bodyOf(root)).toContain("you might regret");
+      expect(bodyOf(root)).not.toContain("limits you set");
+      expect(bodyOf(root)).not.toContain("your own rules");
+      shown?.destroy();
+    }
+  });
+
+  it("keeps the 'your limits' copy when a rule or budget set the lane, even if the model agreed", () => {
+    const root = mount();
+    const v = withFactors("L3", [{ code: "budget.critical", source: "budget", lane: "L3" }, { code: "model.escalation", source: "model", lane: "L3" }]);
+    expect(setByModel(v)).toBe(false);
+    const shown = renderOverlay(root, v, { onExit: vi.fn() });
+    expect(bodyOf(root)).toContain("limits you set");
+    shown?.destroy();
+  });
+
+  it("uses the model copy when a rule only set the floor and the model raised the lane", () => {
+    // L2 rule, model raised to L3: the L3 isn't the user's.
+    const v = withFactors("L3", [{ code: "rule.cart_total", source: "rule", lane: "L2" }, { code: "model.escalation", source: "model", lane: "L3" }]);
+    expect(setByModel(v)).toBe(true);
+  });
+
+  it("uses the default copy without a context (older API)", () => {
+    expect(setByModel(verdict("L3"))).toBe(false);
   });
 });

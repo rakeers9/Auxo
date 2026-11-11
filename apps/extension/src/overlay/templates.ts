@@ -52,6 +52,19 @@ export const CLICK_PAUSE_COPY: Pick<OverlayTemplate, "title" | "body"> = {
   body: "Take a second before you continue. You can still go ahead once the timer runs out.",
 };
 
+// Block copy for when the decision model set the lane, not the user's own
+// rules or budgets: "the limits you set" would be false there.
+export const MODEL_BLOCK_COPY: Partial<Record<Lane, Pick<OverlayTemplate, "title" | "body">>> = {
+  L3: {
+    title: "Hold on",
+    body: "This looks like a purchase you might regret. You can leave, save it for later, or continue once the timer runs out.",
+  },
+  L4: {
+    title: "Step back for a minute",
+    body: "This looks like a big purchase you might regret. Sleep on it, save it for later, or continue once the timer runs out.",
+  },
+};
+
 const TEMPLATES_BY_ID = new Map<string, OverlayTemplate>(
   Object.values(LANE_TEMPLATES).map((template) => [template.id, template]),
 );
