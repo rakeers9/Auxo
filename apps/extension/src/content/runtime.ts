@@ -39,7 +39,8 @@ import { createMiniCartHandler } from "../tracking/minicart-handler";
 import type { MiniCartDiff } from "../tracking/sidesheet";
 import { createPendingStore } from "../tracking/pending";
 import { confirmPurchase } from "../tracking/purchase";
-import { createOverrideCarry } from "../tracking/override-carry";
+import { createCooldownCarry } from "../tracking/cooldown-carry";
+import { createOverrideCarry, type DecidedCart } from "../tracking/override-carry";
 import { createTracker } from "../tracking/tracker";
 import { handleOverlayExit, type ExitDeps, type PassMessage, type PassReply } from "./exit";
 
@@ -120,6 +121,19 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
   const gate = createClickGate({ enabled: ENFORCE, alwaysOn: FORCE_BLOCK, devVerdict: DEV_VERDICT });
   // Carts the user continued past, kept across this tab's pages.
   const carry = createOverrideCarry(sessionStorageOrNull());
+  // A pause or block's timer keeps running across this tab's pages for the
+  // same cart, instead of restarting with each page's fresh decision.
+  const cooldowns = createCooldownCarry(sessionStorageOrNull());
+  // Which cart each of this page's decisions was about.
+  const decidedCarts = new Map<string, DecidedCart>();
+  // The verdict as shown: its cooldown less the time this cart already waited.
+  const withCarriedCooldown = (verdict: Verdict): Verdict => {
+    const cart = decidedCarts.get(verdict.decision_id);
+    if (!cart || verdict.action === "allow") return verdict;
+    const remaining = cooldowns.remaining(cart, verdict.cooldown_seconds);
+    cooldowns.shown(cart);
+    return remaining === verdict.cooldown_seconds ? verdict : { ...verdict, cooldown_seconds: remaining };
+  };
   let debugUi: ShadowRootContentScriptUi<DebugPanel> | null = null;
 
   // What the debug panel shows, kept between checks.
@@ -228,10 +242,11 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
 
   // A known buy click was stopped. Show the pause for it; after Continue,
   // the user clicks the real button again themselves (never replayed).
-  const showBlocked = async (verdict: Verdict, label: string, synthetic: boolean) => {
+  const showBlocked = async (decided: Verdict, label: string, synthetic: boolean) => {
     if (!ENFORCE) return;
     removeOverlay();
     removeHint();
+    const verdict = withCarriedCooldown(decided);
     const next = await createShadowRootUi(ctx, {
       name: "auxo-overlay",
       position: "inline",
@@ -284,13 +299,14 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
     if (trigger && (REDUCING.has(trigger.intent) || trigger.same_cart || trigger.intent === "place_order")) return;
     // The user already continued past this cart, maybe on an earlier page.
     if (carry.covers(verdict.decision_id)) return;
+    const shown = withCarriedCooldown(verdict);
 
     const next = await createShadowRootUi(ctx, {
       name: "auxo-overlay",
       position: "inline",
       anchor: "body",
       onMount: (container) =>
-        renderOverlay(container, verdict, { onExit: (action) => onExit(verdict, action) }),
+        renderOverlay(container, shown, { onExit: (action) => onExit(verdict, action) }),
       onRemove: (handle) => handle?.destroy(),
     });
     if (ctx.isInvalid) return;
@@ -362,6 +378,7 @@ export async function startStore(ctx: ContentScriptContext, adapter: StoreAdapte
       // Runs before the answer is shown or reaches the gate. A cart the user
       // already continued past isn't paused or blocked again (AUX-37).
       const id = result.verdict.decision_id;
+      decidedCarts.set(id, { merchant: cart.merchant, cartHash: cart.cart_hash });
       const until = carry.decided(id, { merchant: cart.merchant, cartHash: cart.cart_hash }, t);
       if (until !== undefined) {
         gate.override(id, until);
