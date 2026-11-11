@@ -5,9 +5,11 @@ import {
   type Budget,
   type Cart,
   type DecideResponse,
+  type DecisionAlternative,
   type DecisionContext,
   type DecisionHistory,
   type DecisionMoment,
+  type Lane,
   type Rule,
   type Trigger,
   type TriggerIntent,
@@ -23,6 +25,7 @@ import {
   evaluateDescriptionRules,
   evaluatePolicyWithContext,
   maxLane,
+  minLane,
   policyVersion,
   type PolicyEvaluation,
 } from "./policy-engine.js";
@@ -31,6 +34,46 @@ import { stubLane } from "./stub-decision.js";
 
 export const STUB_POLICY_VERSION = "stub-v1";
 export const DEFAULT_HISTORY_TIMEOUT_MS = 300;
+// The model raises the lane only as far as it is at least this sure the cart
+// needs that much friction or more (see modelLaneAtLeast). Clef's own
+// `confidence` isn't used: it's on a different, much lower scale (a 0.78
+// probability came back as 0.53 confidence, a 0.45 one as 0.13).
+export const DEFAULT_MODEL_MIN_PROBABILITY = 0.6;
+
+const LANES_STRICTEST_FIRST = ["L4", "L3", "L2", "L1"] as const;
+
+// An alternative is suggested only when the decision adds friction and the
+// model gives its pick at least this probability.
+export const ALTERNATIVE_MIN_PROBABILITY = 0.5;
+// The strategies that link to a search, so they carry a query.
+const SEARCHABLE_ALTERNATIVES = new Set(["renewed", "cheaper_version"]);
+const ALTERNATIVE_QUERY_MAX_LENGTH = 100;
+
+// The alternative to suggest for this decision, if any.
+export function suggestedAlternative(lane: Lane, signal: DecisionSignal | null, cart: Cart): DecisionAlternative | undefined {
+  const pick = signal?.signals?.alternative;
+  if (lane === "L0" || !pick || pick.strategy === "none" || pick.probability < ALTERNATIVE_MIN_PROBABILITY) return undefined;
+  const priciest = [...cart.items].sort((left, right) => right.price_minor * right.qty - left.price_minor * left.qty)[0];
+  const query = priciest?.name.trim().slice(0, ALTERNATIVE_QUERY_MAX_LENGTH).trim();
+  return {
+    strategy: pick.strategy,
+    probability: pick.probability,
+    ...(SEARCHABLE_ALTERNATIVES.has(pick.strategy) && query ? { query } : {}),
+  };
+}
+
+// The strictest lane the model gives at least `minProbability` to "this lane
+// or stricter", capped at the model's own pick. An unsure answer (probability
+// spread across lanes) lands lower than its pick, and L0 when it's unsure
+// about any friction at all.
+export function modelLaneAtLeast(signal: Pick<DecisionSignal, "lane" | "probabilities">, minProbability: number): Lane {
+  let atLeast = 0;
+  for (const lane of LANES_STRICTEST_FIRST) {
+    atLeast += signal.probabilities[lane] ?? 0;
+    if (atLeast >= minProbability) return minLane(lane, signal.lane);
+  }
+  return "L0";
+}
 
 export class HistoryTimeoutError extends Error {
   public constructor(timeoutMs: number) {
@@ -58,6 +101,8 @@ export interface DecisionServiceOptions {
   historyRepository?: HistoryRepository;
   historyTimeoutMs?: number;
   onHistoryError?: (error: unknown) => void;
+  // See DEFAULT_MODEL_MIN_PROBABILITY.
+  modelMinProbability?: number;
   ttlSeconds: number;
   now?: () => Date;
   newDecisionId?: () => string;
@@ -231,7 +276,10 @@ export class DecisionService {
     ];
     const userLane = userFactors.reduce((lane, factor) => maxLane(lane, factor.lane), deterministicLane);
     const userAllowed = userFactors.some((factor) => factor.source === "rule" && factor.lane === "L0");
-    const lane = modelSignal && !userAllowed ? maxLane(userLane, modelSignal.lane) : userLane;
+    const modelLane = modelSignal
+      ? modelLaneAtLeast(modelSignal, this.options.modelMinProbability ?? DEFAULT_MODEL_MIN_PROBABILITY)
+      : null;
+    const lane = modelLane && !userAllowed ? maxLane(userLane, modelLane) : userLane;
     const finalEvaluation: PolicyEvaluation = userFactors.length > 0 ? { lane: userLane, factors: userFactors } : evaluation;
     const decisiveFactors: DecisiveFactor[] = finalEvaluation.factors.map(({ code, source, lane: factorLane }) => ({
       code,
@@ -240,7 +288,7 @@ export class DecisionService {
     }));
     // When the model raised the lane above what the user's setup asked for, say so.
     if (modelSignal && lane !== userLane) {
-      decisiveFactors.push({ code: "model.escalation", source: "model", lane: modelSignal.lane });
+      decisiveFactors.push({ code: "model.escalation", source: "model", lane });
     }
 
     return {
@@ -306,7 +354,7 @@ function createDecisionContext(
           model: modelSignal.model,
           suggested_lane: modelSignal.lane,
           confidence: modelSignal.confidence,
-          ...(modelSignal.signals ? { signals: modelSignal.signals } : {}),
+          ...(modelSignal.signals ? { signals: signalsForContext(modelSignal.signals) } : {}),
         }
       : null,
     decisive_factors: outcome.decisiveFactors,
@@ -317,7 +365,21 @@ function createDecisionContext(
         : ["leave", "save_for_later", "override_after_cooldown"],
     ...(history ? { history } : {}),
     ...(moment ? { moment } : {}),
+    ...withAlternative(suggestedAlternative(verdict.lane, modelSignal, cart)),
   };
+}
+
+// The context's signals are the impulse and want reads; the alternative has
+// its own field.
+function signalsForContext(signals: NonNullable<DecisionSignal["signals"]>): { impulse?: number; want?: number } {
+  return {
+    ...(signals.impulse !== undefined ? { impulse: signals.impulse } : {}),
+    ...(signals.want !== undefined ? { want: signals.want } : {}),
+  };
+}
+
+function withAlternative(alternative: DecisionAlternative | undefined): { alternative?: DecisionAlternative } {
+  return alternative ? { alternative } : {};
 }
 
 function dateOnly(value: Date): string {

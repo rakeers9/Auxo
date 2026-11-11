@@ -5,7 +5,7 @@ import { DecisionContextSchema, type Cart, type DecisionHistory, type Trigger, t
 import { InMemoryDecisionRepository } from "../repositories/decision-repository.js";
 import { InMemorySettingsRepository } from "../repositories/settings-repository.js";
 import type { HistoryRepository } from "../repositories/history-repository.js";
-import { DecisionService, HistoryTimeoutError } from "./decision-service.js";
+import { DecisionService, HistoryTimeoutError, modelLaneAtLeast, suggestedAlternative } from "./decision-service.js";
 import type { DecisionModelProvider } from "./decision-model-provider.js";
 
 const cart: Cart = {
@@ -243,7 +243,8 @@ describe("DecisionService", () => {
         return {
           lane: modelLane,
           confidence: 0.8,
-          probabilities: { L0: 0.2, L1: 0.2, L2: 0.2, L3: 0.2, L4: 0.2 },
+          // A sure answer: most of the probability on the model's pick.
+          probabilities: { L0: 0.05, L1: 0.05, L2: 0.05, L3: 0.05, L4: 0.05, [modelLane]: 0.8 },
           model: "clef-test",
           rules: answers.map(({ rule, applies, lane }) => ({ rule_id: ids.get(rule)!, applies, ...(lane ? { lane } : {}) })),
         };
@@ -681,5 +682,123 @@ describe("DecisionService", () => {
       expect(evaluate.mock.calls[0]?.[0]).not.toHaveProperty("moment");
       expect(verdict.context).not.toHaveProperty("moment");
     });
+  });
+
+  describe("how sure the model must be to raise the lane", () => {
+    type Probabilities = Record<"L0" | "L1" | "L2" | "L3" | "L4", number>;
+    async function decideWith(pick: "L0" | "L1" | "L2" | "L3" | "L4", probabilities: Probabilities, floorLane?: "L1" | "L2") {
+      const settingsRepository = new InMemorySettingsRepository();
+      if (floorLane) {
+        await settingsRepository.createRule("user-1", {
+          name: "Floor",
+          rule_type: "cart_total",
+          configuration: { threshold_minor: 0, lane: floorLane },
+          enabled: true,
+        });
+      }
+      const service = new DecisionService({
+        repository: new InMemoryDecisionRepository(),
+        settingsRepository,
+        decisionModelProvider: {
+          modelVersion: "clef-test",
+          evaluate: async () => ({ lane: pick, confidence: 0.1, probabilities, model: "clef-test" }),
+        },
+        ttlSeconds: 60,
+      });
+      return service.decide("user-1", cart);
+    }
+
+    it("raises the lane fully when the model is sure", async () => {
+      const verdict = await decideWith("L3", { L0: 0.05, L1: 0.05, L2: 0.1, L3: 0.75, L4: 0.05 });
+      expect(verdict.lane).toBe("L3");
+      expect(verdict.context?.decisive_factors).toContainEqual({ code: "model.escalation", source: "model", lane: "L3" });
+    });
+
+    it("raises it only as far as the model is 60% sure of (production's $1,026 cart)", async () => {
+      // Clef's real answer: L2 picked with 0.45, L2-or-stricter 0.60, so L2 stands.
+      expect((await decideWith("L2", { L0: 0.1178, L1: 0.2792, L2: 0.4472, L3: 0.1372, L4: 0.0186 })).lane).toBe("L2");
+      // Flatter: L2 picked but L2-or-stricter only 0.5; L1-or-stricter 0.75.
+      const unsure = await decideWith("L2", { L0: 0.25, L1: 0.25, L2: 0.3, L3: 0.1, L4: 0.1 });
+      expect(unsure.lane).toBe("L1");
+      expect(unsure.context?.decisive_factors).toContainEqual({ code: "model.escalation", source: "model", lane: "L1" });
+      expect(unsure.context?.model_signal?.suggested_lane).toBe("L2");
+    });
+
+    it("adds no friction when the model is unsure there should be any", async () => {
+      const verdict = await decideWith("L1", { L0: 0.45, L1: 0.3, L2: 0.15, L3: 0.05, L4: 0.05 });
+      expect(verdict.lane).toBe("L0");
+      expect(verdict.context?.decisive_factors).toEqual([{ code: "no_policy_match", source: "policy", lane: "L0" }]);
+    });
+
+    it("never goes past the model's own pick, even for a split answer", async () => {
+      // Two peaks: L0 picked, but 0.65 on L3-or-stricter.
+      expect((await decideWith("L0", { L0: 0.35, L1: 0, L2: 0, L3: 0.325, L4: 0.325 })).lane).toBe("L0");
+    });
+
+    it("keeps the user's floor when the model is unsure about going higher", async () => {
+      const verdict = await decideWith("L4", { L0: 0.1, L1: 0.2, L2: 0.3, L3: 0.2, L4: 0.2 }, "L2");
+      // L2-or-stricter is 0.7 but L3-or-stricter only 0.4: the floor's L2 stands, no escalation.
+      expect(verdict.lane).toBe("L2");
+      expect(verdict.context?.decisive_factors).toEqual([{ code: "rule.cart_total", source: "rule", lane: "L2" }]);
+    });
+  });
+});
+
+describe("modelLaneAtLeast", () => {
+  it("treats a missing lane as zero probability", () => {
+    expect(modelLaneAtLeast({ lane: "L3", probabilities: { L3: 0.7 } }, 0.6)).toBe("L3");
+    expect(modelLaneAtLeast({ lane: "L3", probabilities: {} }, 0.6)).toBe("L0");
+  });
+});
+
+describe("alternatives", () => {
+  const sure = { L0: 0.02, L1: 0.03, L2: 0.85, L3: 0.05, L4: 0.05 };
+  const laptopCart: Cart = {
+    merchant: "amazon.com",
+    items: [
+      { name: "USB-C cable", price_minor: 1_299, qty: 2 },
+      { name: "  Gaming laptop 16in RTX  ", price_minor: 149_999, qty: 1 },
+    ],
+    total_minor: 152_597,
+    currency: "USD",
+    url: "https://www.amazon.com/cart",
+    cart_hash: "b".repeat(64),
+  };
+  function signal(lane: "L0" | "L2", strategy: "renewed" | "wait_for_deal" | "none", probability: number) {
+    return { lane, confidence: 0.5, probabilities: sure, model: "clef-test", signals: { alternative: { strategy, probability } } };
+  }
+
+  it("suggests the model's pick with a search for the priciest item when there's friction", () => {
+    expect(suggestedAlternative("L2", signal("L2", "renewed", 0.7), laptopCart)).toEqual({
+      strategy: "renewed",
+      probability: 0.7,
+      query: "Gaming laptop 16in RTX",
+    });
+  });
+
+  it("gives no search for a strategy that doesn't link to one", () => {
+    expect(suggestedAlternative("L2", signal("L2", "wait_for_deal", 0.6), laptopCart)).toEqual({ strategy: "wait_for_deal", probability: 0.6 });
+  });
+
+  it("suggests nothing at L0, for none, or when the model is under 50% sure", () => {
+    expect(suggestedAlternative("L0", signal("L0", "renewed", 0.9), laptopCart)).toBeUndefined();
+    expect(suggestedAlternative("L2", signal("L2", "none", 0.9), laptopCart)).toBeUndefined();
+    expect(suggestedAlternative("L2", signal("L2", "renewed", 0.49), laptopCart)).toBeUndefined();
+    expect(suggestedAlternative("L2", null, laptopCart)).toBeUndefined();
+  });
+
+  it("puts the suggestion in the decision context, and keeps it out of the signals", async () => {
+    const service = new DecisionService({
+      repository: new InMemoryDecisionRepository(),
+      decisionModelProvider: { modelVersion: "clef-test", evaluate: async () => ({ ...signal("L2", "renewed", 0.7), signals: { impulse: 0.8, alternative: { strategy: "renewed" as const, probability: 0.7 } } }) },
+      ttlSeconds: 60,
+    });
+
+    const verdict = await service.decide("user-1", laptopCart);
+
+    expect(verdict.lane).toBe("L2");
+    expect(verdict.context?.alternative).toEqual({ strategy: "renewed", probability: 0.7, query: "Gaming laptop 16in RTX" });
+    expect(verdict.context?.model_signal?.signals).toEqual({ impulse: 0.8 });
+    expect(DecisionContextSchema.safeParse(verdict.context).success).toBe(true);
   });
 });

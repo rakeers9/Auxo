@@ -172,6 +172,7 @@ describe("CloudflareClefProvider free-text rules (AUX-50)", () => {
     const questions = sentQuestions(request);
     expect(Object.keys(questions).sort()).toEqual([
       "intervention_lane",
+      "signal.alternative",
       "signal.impulse",
       "signal.want",
       `rule.${withLane.id}.applies`,
@@ -242,7 +243,7 @@ describe("CloudflareClefProvider free-text rules (AUX-50)", () => {
     await provider.evaluate({ cart, rules: [disabled, broken, ...many], budgets: [], deterministicLane: "L0" });
 
     const questions = sentQuestions(request);
-    expect(Object.keys(questions)).toHaveLength(3 + 2 * MAX_DESCRIPTION_RULES_PER_REQUEST);
+    expect(Object.keys(questions)).toHaveLength(4 + 2 * MAX_DESCRIPTION_RULES_PER_REQUEST);
     expect(Object.keys(questions).length).toBeLessThanOrEqual(64);
     expect(questions[`rule.${disabled.id}.applies`]).toBeUndefined();
     expect(questions[`rule.${broken.id}.applies`]).toBeUndefined();
@@ -332,5 +333,35 @@ describe("CloudflareClefProvider moment, trigger, and signals", () => {
       deterministicLane: "L0",
     });
     expect(none).not.toHaveProperty("signals");
+  });
+
+  it("asks which alternative fits in the same request and returns the pick with its probability", async () => {
+    const request = clef({
+      "signal.alternative": {
+        type: "choice",
+        choice: "renewed",
+        confidence: 0.4,
+        probabilities: { renewed: 0.71, cheaper_version: 0.12, wait_for_deal: 0.08, already_own: 0.04, fewer: 0.01, none: 0.04 },
+      },
+    });
+    const provider = new CloudflareClefProvider({ accountId: "a", apiToken: "t", fetch: request });
+
+    const signal = await provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0" });
+
+    expect(request).toHaveBeenCalledOnce();
+    const question = sentBody(request).questions["signal.alternative"] as { type: string; criteria: Record<string, string> };
+    expect(question.type).toBe("choice");
+    expect(Object.keys(question.criteria).sort()).toEqual(["already_own", "cheaper_version", "fewer", "none", "renewed", "wait_for_deal"]);
+    expect(signal.signals?.alternative).toEqual({ strategy: "renewed", probability: 0.71 });
+  });
+
+  it("leaves out an alternative answer with an unknown choice", async () => {
+    const provider = new CloudflareClefProvider({
+      accountId: "a",
+      apiToken: "t",
+      fetch: clef({ "signal.alternative": { type: "choice", choice: "steal_it", confidence: 0.9, probabilities: { steal_it: 0.9 } } }),
+    });
+    const signal = await provider.evaluate({ cart, rules: [], budgets: [], deterministicLane: "L0" });
+    expect(signal).not.toHaveProperty("signals");
   });
 });

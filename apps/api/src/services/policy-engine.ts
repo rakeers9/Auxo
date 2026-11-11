@@ -192,6 +192,10 @@ export function maxLane(left: Lane, right: Lane): Lane {
   return LANE_RANK[left] >= LANE_RANK[right] ? left : right;
 }
 
+export function minLane(left: Lane, right: Lane): Lane {
+  return LANE_RANK[left] <= LANE_RANK[right] ? left : right;
+}
+
 function dateOnly(value: Date): string {
   return value.toISOString().slice(0, 10);
 }

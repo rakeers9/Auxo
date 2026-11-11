@@ -2,7 +2,7 @@ import type { Lane, Verdict } from "@auxo/shared";
 import { VerdictSchema } from "@auxo/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatSeconds, reasonLine, renderOverlay, type OverlayHandle } from "./render";
+import { formatSeconds, ideaFor, reasonLine, renderOverlay, type OverlayHandle } from "./render";
 import { LANE_TEMPLATES } from "./templates";
 
 const COOLDOWN: Record<Lane, number> = { L0: 0, L1: 0, L2: 60, L3: 300, L4: 900 };
@@ -400,6 +400,81 @@ describe("why the overlay showed up (AUX-50)", () => {
     const root = mount();
     const shown = renderOverlay(root, verdict("L3"), { onExit: vi.fn() });
     expect(root.querySelector('[data-role="why"]')).toBeNull();
+    shown?.destroy();
+  });
+});
+
+describe("suggesting an alternative", () => {
+  type Context = NonNullable<Verdict["context"]>;
+  function withIdea(lane: Lane, alternative: Context["alternative"], merchant = "amazon.com"): Verdict {
+    return verdict(lane, {
+      context: {
+        decision_id: "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f",
+        cart_summary: { merchant, total_minor: 149_999, currency: "USD", item_count: 1 },
+        budget: null,
+        matched_rules: [],
+        model_signal: null,
+        decisive_factors: [{ code: "model.escalation", source: "model", lane }],
+        available_actions: ["leave", "save_for_later", "continue"],
+        ...(alternative ? { alternative } : {}),
+      },
+    });
+  }
+
+  it("links a renewed search on the same Amazon store", () => {
+    const idea = ideaFor(withIdea("L2", { strategy: "renewed", probability: 0.7, query: "Gaming laptop & dock" }));
+    expect(idea).toEqual({
+      text: "Idea: a renewed or used one could do the same job for less.",
+      link: { href: "https://www.amazon.com/s?k=Gaming%20laptop%20%26%20dock%20renewed", text: "See renewed options" },
+    });
+    expect(ideaFor(withIdea("L2", { strategy: "cheaper_version", probability: 0.6, query: "Desk" }, "amazon.co.uk"))?.link?.href).toBe(
+      "https://www.amazon.co.uk/s?k=Desk",
+    );
+  });
+
+  it("gives text only for strategies without a search, for other stores, or without a query", () => {
+    expect(ideaFor(withIdea("L2", { strategy: "wait_for_deal", probability: 0.6 }))).toEqual({
+      text: "Idea: this may not be urgent. Save it and see if the price drops.",
+    });
+    expect(ideaFor(withIdea("L2", { strategy: "renewed", probability: 0.7, query: "Laptop" }, "evil.example"))).not.toHaveProperty("link");
+    expect(ideaFor(withIdea("L2", { strategy: "renewed", probability: 0.7 }))).not.toHaveProperty("link");
+    expect(ideaFor(withIdea("L2", undefined))).toBeUndefined();
+  });
+
+  it("shows the idea in the banner and the pause dialog, as text, with a link that opens a new tab", () => {
+    const sneaky = "<img src=x onerror=alert(1)>";
+    for (const lane of ["L1", "L2", "L3"] as const) {
+      const root = mount();
+      const shown = renderOverlay(root, withIdea(lane, { strategy: "renewed", probability: 0.7, query: sneaky }), { onExit: vi.fn() });
+      const line = root.querySelector('[data-role="idea"]');
+      expect(line?.textContent).toBe("Idea: a renewed or used one could do the same job for less. See renewed options");
+      const link = line?.querySelector("a");
+      expect(link?.getAttribute("target")).toBe("_blank");
+      expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+      expect(root.querySelector("img")).toBeNull();
+      shown?.destroy();
+    }
+  });
+
+  it("lets Tab reach the link inside the dialog", () => {
+    vi.useFakeTimers();
+    const root = mount();
+    const shown = renderOverlay(root, withIdea("L3", { strategy: "renewed", probability: 0.7, query: "Laptop" }), { onExit: vi.fn() });
+    const dialog = root.querySelector<HTMLElement>(".auxo-dialog");
+    const link = root.querySelector<HTMLAnchorElement>('[data-role="idea"] a');
+    link?.focus();
+    expect(root.activeElement).toBe(link);
+    // From the link, Tab moves on to an enabled button instead of leaving the dialog.
+    dialog?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, composed: true, cancelable: true }));
+    expect((root.activeElement as HTMLElement | null)?.tagName).toBe("BUTTON");
+    shown?.destroy();
+    vi.useRealTimers();
+  });
+
+  it("adds no idea line without a suggestion", () => {
+    const root = mount();
+    const shown = renderOverlay(root, withIdea("L2", undefined), { onExit: vi.fn() });
+    expect(root.querySelector('[data-role="idea"]')).toBeNull();
     shown?.destroy();
   });
 });

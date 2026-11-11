@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { DecisionAlternativeSchema } from "./alternatives.js";
 import { LaneSchema } from "./lane.js";
 import { DecisionMomentSchema } from "./moment.js";
 import { RuleTypeSchema } from "./rules.js";
@@ -79,6 +80,9 @@ export const DecisionContextSchema = z
     history: DecisionHistorySchema.optional(),
     // The user's local time when the request names their time zone.
     moment: DecisionMomentSchema.optional(),
+    // A kind of alternative that could still satisfy the want, when the
+    // decision adds friction and the model is fairly sure one fits.
+    alternative: DecisionAlternativeSchema.optional(),
   })
   .strict();
 
